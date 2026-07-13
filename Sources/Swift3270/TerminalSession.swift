@@ -24,7 +24,8 @@ final class TerminalSession: ObservableObject, Identifiable {
         self.backend = Self.makeBackend(codePage: profile.codePage) { _ in }
         resetScreenBuffer()
         backend = Self.makeBackend(codePage: profile.codePage) { [weak self] event in
-            Task { @MainActor in self?.applyScreenEvent(event) }
+            guard let session = self else { return }
+            Task { @MainActor in session.applyScreenEvent(event) }
         }
     }
 
@@ -142,8 +143,9 @@ final class TerminalSession: ObservableObject, Identifiable {
 
     private func rebuildBackend() {
         backend = Self.makeBackend(codePage: profile.codePage) { [weak self] event in
+            guard let session = self else { return }
             Task { @MainActor in
-                self?.applyScreenEvent(event)
+                session.applyScreenEvent(event)
             }
         }
     }

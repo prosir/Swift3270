@@ -47,14 +47,14 @@ actor B3270Backend {
 
         output.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
-            guard !data.isEmpty else { return }
-            Task { await self?.acceptOutput(data) }
+            guard !data.isEmpty, let backend = self else { return }
+            Task { await backend.acceptOutput(data) }
         }
 
         errorOutput.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
-            guard !data.isEmpty else { return }
-            Task { await self?.discardErrorOutput() }
+            guard !data.isEmpty, let backend = self else { return }
+            Task { await backend.discardErrorOutput() }
         }
     }
 
