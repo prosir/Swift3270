@@ -3,8 +3,10 @@ import Foundation
 
 let root = URL(fileURLWithPath: CommandLine.arguments.dropFirst().first ?? FileManager.default.currentDirectoryPath)
 let iconset = root.appendingPathComponent("Swift3270.iconset", isDirectory: true)
+let icns = root.appendingPathComponent("Swift3270.icns")
 
 try? FileManager.default.removeItem(at: iconset)
+try? FileManager.default.removeItem(at: icns)
 try FileManager.default.createDirectory(at: iconset, withIntermediateDirectories: true)
 
 let sizes: [(String, Int)] = [
@@ -25,8 +27,29 @@ func color(_ red: CGFloat, _ green: CGFloat, _ blue: CGFloat, _ alpha: CGFloat =
 }
 
 for (name, size) in sizes {
-    let image = NSImage(size: NSSize(width: size, height: size))
-    image.lockFocus()
+    guard let bitmap = NSBitmapImageRep(
+        bitmapDataPlanes: nil,
+        pixelsWide: size,
+        pixelsHigh: size,
+        bitsPerSample: 8,
+        samplesPerPixel: 4,
+        hasAlpha: true,
+        isPlanar: false,
+        colorSpaceName: .deviceRGB,
+        bytesPerRow: 0,
+        bitsPerPixel: 0
+    ) else {
+        fatalError("Could not create bitmap for \(name)")
+    }
+
+    bitmap.size = NSSize(width: size, height: size)
+    guard let context = NSGraphicsContext(bitmapImageRep: bitmap) else {
+        fatalError("Could not create graphics context for \(name)")
+    }
+
+    NSGraphicsContext.saveGraphicsState()
+    NSGraphicsContext.current = context
+    context.cgContext.clear(CGRect(x: 0, y: 0, width: size, height: size))
 
     let rect = NSRect(x: 0, y: 0, width: size, height: size)
     let scale = CGFloat(size)
@@ -55,12 +78,46 @@ for (name, size) in sizes {
     color(0.74, 0.90, 1.00).setFill()
     cursor.fill()
 
-    image.unlockFocus()
+    NSGraphicsContext.restoreGraphicsState()
 
-    guard let tiff = image.tiffRepresentation,
-          let bitmap = NSBitmapImageRep(data: tiff),
-          let png = bitmap.representation(using: .png, properties: [:]) else {
+    guard let png = bitmap.representation(using: .png, properties: [:]) else {
         fatalError("Could not render \(name)")
     }
     try png.write(to: iconset.appendingPathComponent(name))
 }
+
+let icnsEntries: [(type: String, filename: String)] = [
+    ("icp4", "icon_16x16.png"),
+    ("icp5", "icon_32x32.png"),
+    ("icp6", "icon_32x32@2x.png"),
+    ("ic07", "icon_128x128.png"),
+    ("ic08", "icon_256x256.png"),
+    ("ic09", "icon_512x512.png"),
+    ("ic10", "icon_512x512@2x.png")
+]
+
+func bigEndianUInt32(_ value: Int) -> Data {
+    var number = UInt32(value).bigEndian
+    return Data(bytes: &number, count: MemoryLayout<UInt32>.size)
+}
+
+func fourCharacterData(_ value: String) -> Data {
+    guard let data = value.data(using: .ascii), data.count == 4 else {
+        fatalError("Invalid ICNS type \(value)")
+    }
+    return data
+}
+
+var chunks = Data()
+for entry in icnsEntries {
+    let png = try Data(contentsOf: iconset.appendingPathComponent(entry.filename))
+    chunks.append(fourCharacterData(entry.type))
+    chunks.append(bigEndianUInt32(png.count + 8))
+    chunks.append(png)
+}
+
+var icnsData = Data()
+icnsData.append(fourCharacterData("icns"))
+icnsData.append(bigEndianUInt32(chunks.count + 8))
+icnsData.append(chunks)
+try icnsData.write(to: icns)

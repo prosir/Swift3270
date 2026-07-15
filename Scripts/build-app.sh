@@ -28,7 +28,9 @@ cp "$ROOT_DIR/.build/release/Swift3270" "$MACOS_DIR/Swift3270"
 chmod +x "$MACOS_DIR/Swift3270"
 
 swift "$ROOT_DIR/Scripts/generate-icon.swift" "$ROOT_DIR/.build"
-if ! iconutil --convert icns "$ROOT_DIR/.build/Swift3270.iconset" --output "$RESOURCES_DIR/Swift3270.icns"; then
+if [[ -f "$ROOT_DIR/.build/Swift3270.icns" ]]; then
+  cp "$ROOT_DIR/.build/Swift3270.icns" "$RESOURCES_DIR/Swift3270.icns"
+elif ! iconutil --convert icns "$ROOT_DIR/.build/Swift3270.iconset" --output "$RESOURCES_DIR/Swift3270.icns"; then
   echo "Warning: could not generate Swift3270.icns; continuing without a custom app icon." >&2
 fi
 

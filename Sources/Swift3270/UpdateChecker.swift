@@ -5,7 +5,8 @@ import Foundation
 final class UpdateChecker: ObservableObject {
     @Published var availableUpdate: AppUpdate?
 
-    private let releasesURL = URL(string: "https://api.github.com/repos/prosir/Swift3270/releases/latest")!
+    private let releasesURL = URL(string: "https://api.github.com/repos/prosir/Swift3270/releases")!
+    private let tagsURL = URL(string: "https://api.github.com/repos/prosir/Swift3270/tags")!
     private let currentVersion: AppVersion
 
     init(currentVersion: AppVersion = .current) {
@@ -13,32 +14,73 @@ final class UpdateChecker: ObservableObject {
     }
 
     func checkForUpdates() async {
-        var request = URLRequest(url: releasesURL)
+        if let release = await latestReleaseUpdate() {
+            availableUpdate = release
+            return
+        }
+
+        availableUpdate = await latestTagUpdate()
+    }
+
+    private func latestReleaseUpdate() async -> AppUpdate? {
+        do {
+            let releases = try await fetch([GitHubRelease].self, from: releasesURL)
+            return releases
+                .filter { !$0.draft }
+                .compactMap { release -> (version: AppVersion, update: AppUpdate)? in
+                    guard let version = AppVersion(release.tagName), version > currentVersion else { return nil }
+                    return (
+                        version,
+                        AppUpdate(
+                            version: release.tagName,
+                            title: release.displayName,
+                            changelog: release.displayBody,
+                            url: release.htmlURL
+                        )
+                    )
+                }
+                .max { $0.version < $1.version }?
+                .update
+        } catch {
+            return nil
+        }
+    }
+
+    private func latestTagUpdate() async -> AppUpdate? {
+        do {
+            let tags = try await fetch([GitHubTag].self, from: tagsURL)
+            return tags
+                .compactMap { tag -> (version: AppVersion, update: AppUpdate)? in
+                    guard let version = AppVersion(tag.name), version > currentVersion else { return nil }
+                    return (
+                        version,
+                        AppUpdate(
+                            version: tag.name,
+                            title: tag.name,
+                            changelog: "Er staat een nieuwere tag op GitHub, maar er zijn geen release notes gevonden. Maak een GitHub Release aan voor deze tag om hier de changelog te tonen.",
+                            url: URL(string: "https://github.com/prosir/Swift3270/releases/tag/\(tag.name)")!
+                        )
+                    )
+                }
+                .max { $0.version < $1.version }?
+                .update
+        } catch {
+            return nil
+        }
+    }
+
+    private func fetch<T: Decodable>(_ type: T.Type, from url: URL) async throws -> T {
+        var request = URLRequest(url: url)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("Swift3270", forHTTPHeaderField: "User-Agent")
 
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let httpResponse = response as? HTTPURLResponse,
-                  (200..<300).contains(httpResponse.statusCode) else {
-                return
-            }
-
-            let release = try JSONDecoder().decode(GitHubRelease.self, from: data)
-            guard let latestVersion = AppVersion(release.tagName),
-                  latestVersion > currentVersion else {
-                return
-            }
-
-            availableUpdate = AppUpdate(
-                version: release.tagName,
-                title: release.name.isEmpty ? release.tagName : release.name,
-                changelog: release.body.trimmingCharacters(in: .whitespacesAndNewlines),
-                url: release.htmlURL
-            )
-        } catch {
-            return
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200..<300).contains(httpResponse.statusCode) else {
+            throw URLError(.badServerResponse)
         }
+
+        return try JSONDecoder().decode(T.self, from: data)
     }
 }
 
@@ -61,7 +103,7 @@ struct AppVersion: Comparable {
     init?(_ text: String) {
         let normalized = text
             .trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingPrefix("v")
+            .trimmingVersionPrefix()
 
         let parts = normalized.split(separator: ".")
         guard !parts.isEmpty else { return nil }
@@ -94,20 +136,36 @@ struct AppVersion: Comparable {
 
 private struct GitHubRelease: Decodable {
     let tagName: String
-    let name: String
-    let body: String
+    let name: String?
+    let body: String?
     let htmlURL: URL
+    let draft: Bool
+
+    var displayName: String {
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? tagName : trimmed
+    }
+
+    var displayBody: String {
+        body?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
 
     enum CodingKeys: String, CodingKey {
         case tagName = "tag_name"
         case name
         case body
         case htmlURL = "html_url"
+        case draft
     }
 }
 
+private struct GitHubTag: Decodable {
+    let name: String
+}
+
 private extension String {
-    func trimmingPrefix(_ prefix: String) -> String {
-        hasPrefix(prefix) ? String(dropFirst(prefix.count)) : self
+    func trimmingVersionPrefix() -> String {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.lowercased().hasPrefix("v") ? String(trimmed.dropFirst()) : trimmed
     }
 }
