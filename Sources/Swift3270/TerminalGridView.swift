@@ -9,13 +9,38 @@ struct TerminalGridView: View {
     let selection: TerminalSelection?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(normalizedCells.enumerated()), id: \.offset) { row, rowCells in
-                TerminalLineView(cells: rowCells, row: row, fontSize: fontSize, cursor: cursor, theme: theme, selection: selection)
-                    .frame(height: TerminalMetrics.lineHeight(fontSize))
+        let cellWidth = TerminalMetrics.cellWidth(fontSize)
+        let lineHeight = TerminalMetrics.lineHeight(fontSize)
+        let gridWidth = CGFloat(80) * cellWidth
+        let gridHeight = CGFloat(24) * lineHeight
+
+        Canvas { context, _ in
+            let rows = normalizedCells
+            for row in rows.indices {
+                for cell in rows[row] {
+                    let column = cell.column
+                    let isCursor = cursor.row == row && cursor.column == column
+                    let isSelected = selection?.contains(row: row, column: column) == true
+                    let rect = CGRect(
+                        x: 6 + CGFloat(column) * cellWidth,
+                        y: 6 + CGFloat(row) * lineHeight,
+                        width: cellWidth,
+                        height: lineHeight
+                    )
+
+                    let background = background(for: cell, isCursor: isCursor, isSelected: isSelected)
+                    context.fill(Path(rect), with: .color(background))
+
+                    var text = context.resolve(
+                        Text(String(cell.character))
+                            .font(.system(size: fontSize, weight: .regular, design: .monospaced))
+                    )
+                    text.shading = .color(textColor(for: cell, isCursor: isCursor, isSelected: isSelected))
+                    context.draw(text, at: CGPoint(x: rect.midX, y: rect.midY), anchor: .center)
+                }
             }
         }
-        .padding(6)
+        .frame(width: gridWidth + 12, height: gridHeight + 12)
         .background(theme.palette.background)
         .border(theme.palette.border)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
@@ -31,31 +56,6 @@ struct TerminalGridView: View {
         }
 
         return cells
-    }
-}
-
-private struct TerminalLineView: View {
-    let cells: [TerminalCell]
-    let row: Int
-    let fontSize: CGFloat
-    let cursor: TerminalCursor
-    let theme: TerminalTheme
-    let selection: TerminalSelection?
-
-    var body: some View {
-        HStack(spacing: 0) {
-            ForEach(cells) { cell in
-                let column = cell.column
-                let isCursor = cursor.row == row && cursor.column == column
-                let isSelected = selection?.contains(row: row, column: column) == true
-
-                Text(String(cell.character))
-                    .font(.system(size: fontSize, weight: .regular, design: .monospaced))
-                    .foregroundStyle(textColor(for: cell, isCursor: isCursor, isSelected: isSelected))
-                    .frame(width: TerminalMetrics.cellWidth(fontSize), height: TerminalMetrics.lineHeight(fontSize))
-                    .background(background(for: cell, isCursor: isCursor, isSelected: isSelected))
-            }
-        }
     }
 
     private func textColor(for cell: TerminalCell, isCursor: Bool, isSelected: Bool) -> Color {
