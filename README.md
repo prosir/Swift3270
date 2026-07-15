@@ -108,6 +108,8 @@ cp -R Swift3270.app /Applications/
 
 The app compares its local `CFBundleShortVersionString` with the latest GitHub release tag.
 
+See [`CHANGELOG.md`](CHANGELOG.md) for release notes.
+
 ## Keyboard and keypad
 
 Common 3270 actions are available from keyboard, menu and keypad:
