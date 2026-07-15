@@ -3,6 +3,7 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var store: SessionStore
+    @StateObject private var updateChecker = UpdateChecker()
     @State private var scaleMode: ScaleMode = .fit
     @State private var manualScale = 1.0
     @State private var showConnectDialog = false
@@ -57,6 +58,12 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showEditSessionDialog) {
             X3270EditSessionDialog(session: store.selectedSession)
+        }
+        .sheet(item: $updateChecker.availableUpdate) { update in
+            X3270UpdateDialog(update: update)
+        }
+        .task {
+            await updateChecker.checkForUpdates()
         }
         .preferredColorScheme(.dark)
     }
@@ -671,6 +678,75 @@ private struct X3270StatusBar: View {
             .frame(height: 22)
             .background(X3270Colors.controlBackground)
             .clipShape(RoundedRectangle(cornerRadius: 7))
+    }
+}
+
+private struct X3270UpdateDialog: View {
+    @Environment(\.dismiss) private var dismiss
+    let update: AppUpdate
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.system(size: 32, weight: .semibold))
+                    .foregroundStyle(X3270Colors.accent)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Nieuwe versie beschikbaar")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(X3270Colors.primaryText)
+
+                    Text("\(update.title) staat op GitHub.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(X3270Colors.secondaryText)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Wat is er veranderd")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(X3270Colors.mutedText)
+
+                ScrollView {
+                    Text(update.changelog.isEmpty ? "Geen changelog opgegeven voor deze release." : update.changelog)
+                        .font(.system(size: 13))
+                        .foregroundStyle(X3270Colors.secondaryText)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .textSelection(.enabled)
+                }
+                .frame(minHeight: 140, maxHeight: 240)
+                .padding(12)
+                .background(X3270Colors.controlBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(X3270Colors.border, lineWidth: 1)
+                )
+            }
+
+            Text("Swift3270 downloadt of installeert updates niet automatisch. Je opent alleen de GitHub release en beslist zelf wat je doet.")
+                .font(.system(size: 12))
+                .foregroundStyle(X3270Colors.mutedText)
+
+            HStack {
+                Button("Later") {
+                    dismiss()
+                }
+                .buttonStyle(.bordered)
+
+                Spacer()
+
+                Button("Open GitHub release") {
+                    NSWorkspace.shared.open(update.url)
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(X3270Colors.accent)
+            }
+        }
+        .padding(22)
+        .frame(width: 520)
+        .background(X3270Colors.panelBackground)
     }
 }
 

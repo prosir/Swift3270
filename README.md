@@ -48,7 +48,7 @@ Custom backend path:
 SWIFT3270_B3270_PATH=/custom/path/b3270 open Swift3270.app
 ```
 
-## Build
+## Build and install
 
 From the repository root:
 
@@ -59,9 +59,26 @@ open Swift3270.app
 
 The build script creates a release app bundle and generates the app icon.
 
+If you want to keep Swift3270 permanently on your Mac, move the app bundle to Applications:
+
+```bash
+cp -R Swift3270.app /Applications/
+open /Applications/Swift3270.app
+```
+
+You can also drag `Swift3270.app` to the Applications folder in Finder.
+
+After the app is in `/Applications`, you can delete the source/build folder if you do not want to keep the code locally. The installed app bundle is self-contained, except that it still needs `b3270` from x3270 to be installed on the Mac.
+
+```bash
+brew install x3270
+```
+
+Because this is currently an unsigned local build, macOS may show a security warning the first time you open it. If that happens, open it with right-click → Open, or allow it in System Settings → Privacy & Security.
+
 ## Using it
 
-1. Open `Swift3270.app`.
+1. Open `Swift3270.app` from Applications.
 2. Create or edit a session.
 3. Fill in hostname and port.
 4. Enable TLS if your host requires it.
@@ -69,6 +86,27 @@ The build script creates a release app bundle and generates the app icon.
 6. Connect.
 
 No need to type `L:`, `Y:` or `A:` manually. The wizard builds the x3270 host string for you.
+
+## Version updates
+
+At startup Swift3270 checks the latest GitHub release metadata. If a newer version exists, the app shows a small update window with the release changelog.
+
+The update check only requests public release information from GitHub. Swift3270 does not send terminal data, hostnames, session profiles or screen contents.
+
+Updates are not downloaded or installed automatically. The button opens the GitHub release page, so you can decide yourself whether to build/install the newer version.
+
+To publish a new visible version:
+
+1. Create a GitHub release with a tag like `v0.1.2`.
+2. Put the changelog in the GitHub release notes.
+3. Build the app locally with the same version:
+
+```bash
+SWIFT3270_VERSION=0.1.2 SWIFT3270_BUILD=3 ./Scripts/build-app.sh
+cp -R Swift3270.app /Applications/
+```
+
+The app compares its local `CFBundleShortVersionString` with the latest GitHub release tag.
 
 ## Keyboard and keypad
 
@@ -101,18 +139,20 @@ Saved profiles contain connection settings only: session name, host, port, LU, T
 
 Certificate exceptions are explicit checkboxes. Normal certificate validation stays the default unless you turn an exception on.
 
-## Releases
+## Builds and releases
 
-GitHub Actions builds the macOS app on pushes, pull requests and manual workflow runs.
+GitHub Actions only checks that the Swift package builds.
 
-Create a release with a version tag:
+Automatic `.app` releases are intentionally disabled. A proper distributable macOS app needs signing/notarization with an Apple Developer account. Without that, the safest option is to build the app locally and share it manually when needed.
+
+Local app bundle:
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+./Scripts/build-app.sh
+cp -R Swift3270.app /Applications/
 ```
 
-The workflow creates `Swift3270-macOS.zip` and attaches it to the GitHub release.
+Manual GitHub workflow runs can upload the raw release binary as a build artifact, but not a packaged `.app`.
 
 ## Troubleshooting
 

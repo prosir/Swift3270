@@ -6,6 +6,8 @@ APP_DIR="$ROOT_DIR/Swift3270.app"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
+APP_VERSION="${SWIFT3270_VERSION:-0.1.1}"
+APP_BUILD="${SWIFT3270_BUILD:-2}"
 
 cd "$ROOT_DIR"
 mkdir -p "$ROOT_DIR/.build/cache" "$ROOT_DIR/.build/module-cache"
@@ -51,9 +53,9 @@ cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.1.1</string>
+  <string>__APP_VERSION__</string>
   <key>CFBundleVersion</key>
-  <string>2</string>
+  <string>__APP_BUILD__</string>
   <key>LSMinimumSystemVersion</key>
   <string>13.0</string>
   <key>NSHighResolutionCapable</key>
@@ -63,6 +65,8 @@ cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
 </dict>
 </plist>
 PLIST
+
+perl -0pi -e "s/__APP_VERSION__/$APP_VERSION/g; s/__APP_BUILD__/$APP_BUILD/g" "$CONTENTS_DIR/Info.plist"
 
 echo "Created $APP_DIR"
 echo "Open it with: open \"$APP_DIR\""
