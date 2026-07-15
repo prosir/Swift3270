@@ -17,7 +17,7 @@ if [[ "${SWIFT3270_DISABLE_SWIFTPM_SANDBOX:-0}" == "1" ]]; then
   SWIFT_BUILD_ARGS+=(--disable-sandbox)
 fi
 
-swift build "${SWIFT_BUILD_ARGS[@]:-}" -c release --cache-path "$ROOT_DIR/.build/cache"
+swift build ${SWIFT_BUILD_ARGS[@]} -c release --cache-path "$ROOT_DIR/.build/cache"
 
 rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
