@@ -12,7 +12,12 @@ mkdir -p "$ROOT_DIR/.build/cache" "$ROOT_DIR/.build/module-cache"
 export SWIFTPM_HOME="$ROOT_DIR/.build/cache"
 export CLANG_MODULE_CACHE_PATH="$ROOT_DIR/.build/module-cache"
 
-swift build -c release --cache-path "$ROOT_DIR/.build/cache"
+SWIFT_BUILD_ARGS=()
+if [[ "${SWIFT3270_DISABLE_SWIFTPM_SANDBOX:-0}" == "1" ]]; then
+  SWIFT_BUILD_ARGS+=(--disable-sandbox)
+fi
+
+swift build "${SWIFT_BUILD_ARGS[@]}" -c release --cache-path "$ROOT_DIR/.build/cache"
 
 rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
@@ -21,7 +26,9 @@ cp "$ROOT_DIR/.build/release/Swift3270" "$MACOS_DIR/Swift3270"
 chmod +x "$MACOS_DIR/Swift3270"
 
 swift "$ROOT_DIR/Scripts/generate-icon.swift" "$ROOT_DIR/.build"
-iconutil -c icns "$ROOT_DIR/.build/Swift3270.iconset" -o "$RESOURCES_DIR/Swift3270.icns"
+if ! iconutil --convert icns "$ROOT_DIR/.build/Swift3270.iconset" --output "$RESOURCES_DIR/Swift3270.icns"; then
+  echo "Warning: could not generate Swift3270.icns; continuing without a custom app icon." >&2
+fi
 
 cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -44,9 +51,9 @@ cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.1.0</string>
+  <string>0.1.1</string>
   <key>CFBundleVersion</key>
-  <string>1</string>
+  <string>2</string>
   <key>LSMinimumSystemVersion</key>
   <string>13.0</string>
   <key>NSHighResolutionCapable</key>

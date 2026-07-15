@@ -7,7 +7,7 @@ struct ContentView: View {
     @State private var showConnectDialog = false
     @State private var showNewSessionDialog = false
     @State private var showEditSessionDialog = false
-    @State private var showKeypad = true
+    @State private var showKeypad = false
     @State private var terminalTheme: TerminalTheme = .ibm3279
 
     var body: some View {
@@ -25,7 +25,7 @@ struct ContentView: View {
 
             X3270SessionStrip()
 
-            HSplitView {
+            HStack(spacing: 0) {
                 X3270TerminalPane(
                     session: store.selectedSession,
                     scaleMode: scaleMode,
@@ -38,8 +38,10 @@ struct ContentView: View {
                     .frame(minWidth: 680)
 
                 if showKeypad {
-                    X3270KeypadPanel(session: store.selectedSession)
-                        .frame(width: 250)
+                    X3270KeypadPanel(session: store.selectedSession, showKeypad: $showKeypad)
+                        .frame(width: 286)
+                        .padding(.trailing, 10)
+                        .padding(.vertical, 10)
                 }
             }
 
@@ -228,13 +230,14 @@ private struct X3270MenuBar: View {
             Button {
                 showKeypad.toggle()
             } label: {
-                Label("Keypad", systemImage: "keyboard")
+                Label(showKeypad ? "Hide Keys" : "Keys", systemImage: showKeypad ? "sidebar.right" : "keyboard")
                     .font(.system(size: 12, weight: .medium))
                     .padding(.horizontal, 10)
                     .frame(height: 28)
             }
             .buttonStyle(.plain)
-            .background(X3270Colors.controlBackground)
+            .foregroundStyle(showKeypad ? X3270Colors.selectedText : X3270Colors.primaryText)
+            .background(showKeypad ? X3270Colors.selectedTab : X3270Colors.controlBackground)
             .clipShape(RoundedRectangle(cornerRadius: 7))
 
             Spacer(minLength: 0)
@@ -595,91 +598,152 @@ private struct X3270StatusBar: View {
 
 private struct X3270KeypadPanel: View {
     @ObservedObject var session: TerminalSession
+    @Binding var showKeypad: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("x3270 Keypad")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(X3270Colors.primaryText)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Keypad")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(X3270Colors.primaryText)
+                    Text("3270 actions")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(X3270Colors.mutedText)
+                }
 
-            Grid(horizontalSpacing: 4, verticalSpacing: 4) {
-                GridRow {
-                    key("Reset", width: 56) { await session.sendReset() }
-                    key("Clear", width: 56) { await session.sendClear() }
-                    key("Enter", width: 56) { await session.sendEnter() }
+                Spacer()
+
+                Button {
+                    showKeypad = false
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .frame(width: 26, height: 26)
                 }
-                GridRow {
-                    key("PA1", width: 36) { await session.sendPA(1) }
-                    key("PA2", width: 36) { await session.sendPA(2) }
-                    key("PA3", width: 36) { await session.sendPA(3) }
-                }
+                .buttonStyle(.plain)
+                .foregroundStyle(X3270Colors.secondaryText)
+                .background(X3270Colors.controlBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 7))
             }
 
-            Divider()
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 14) {
+                    section("Session") {
+                        HStack(spacing: 6) {
+                            key("Reset") { await session.sendReset() }
+                            key("Clear") { await session.sendClear() }
+                            key("Enter", prominent: true) { await session.sendEnter() }
+                        }
+                    }
 
-            Grid(horizontalSpacing: 4, verticalSpacing: 4) {
-                ForEach(0..<6, id: \.self) { row in
-                    GridRow {
-                        ForEach(1...4, id: \.self) { column in
-                            let pf = row * 4 + column
-                            key("PF\(pf)", width: 48) { await session.sendPF(pf) }
+                    section("Program function") {
+                        Grid(horizontalSpacing: 6, verticalSpacing: 6) {
+                            ForEach(0..<6, id: \.self) { row in
+                                GridRow {
+                                    ForEach(1...4, id: \.self) { column in
+                                        let pf = row * 4 + column
+                                        key("PF\(pf)") { await session.sendPF(pf) }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    section("Attention") {
+                        HStack(spacing: 6) {
+                            key("PA1") { await session.sendPA(1) }
+                            key("PA2") { await session.sendPA(2) }
+                            key("PA3") { await session.sendPA(3) }
+                        }
+                    }
+
+                    section("Navigate") {
+                        Grid(horizontalSpacing: 6, verticalSpacing: 6) {
+                            GridRow {
+                                spacerKey()
+                                key("Up") { session.handleKeyEvent(.up) }
+                                spacerKey()
+                            }
+                            GridRow {
+                                key("Left") { session.handleKeyEvent(.left) }
+                                key("Home") { session.handleKeyEvent(.home) }
+                                key("Right") { session.handleKeyEvent(.right) }
+                            }
+                            GridRow {
+                                key("PgUp") { session.handleKeyEvent(.pageUp) }
+                                key("Down") { session.handleKeyEvent(.down) }
+                                key("PgDn") { session.handleKeyEvent(.pageDown) }
+                            }
+                        }
+                    }
+
+                    section("Edit") {
+                        Grid(horizontalSpacing: 6, verticalSpacing: 6) {
+                            GridRow {
+                                key("Delete") { session.handleKeyEvent(.delete) }
+                                key("Erase") { session.handleKeyEvent(.erase) }
+                                key("End") { await session.sendEraseEOF() }
+                            }
+                            GridRow {
+                                key("BackTab") { session.handleKeyEvent(.backTab) }
+                                key("Dup") { await session.sendDup() }
+                                key("Field") { await session.sendFieldMark() }
+                            }
+                            GridRow {
+                                key("Attn") { await session.sendAttn() }
+                                key("SysReq") { await session.sendSysReq() }
+                                spacerKey()
+                            }
                         }
                     }
                 }
+                .padding(.bottom, 2)
             }
-
-            Divider()
-
-            Grid(horizontalSpacing: 4, verticalSpacing: 4) {
-                GridRow {
-                    key("Home", width: 48) { session.handleKeyEvent(.home) }
-                    key("Up", width: 48) { session.handleKeyEvent(.up) }
-                    key("Delete", width: 56) { session.handleKeyEvent(.delete) }
-                }
-                GridRow {
-                    key("Left", width: 48) { session.handleKeyEvent(.left) }
-                    key("Right", width: 48) { session.handleKeyEvent(.right) }
-                    key("Erase", width: 56) { session.handleKeyEvent(.erase) }
-                }
-                GridRow {
-                    key("BackTab", width: 56) { session.handleKeyEvent(.backTab) }
-                    key("Down", width: 48) { session.handleKeyEvent(.down) }
-                    key("End", width: 64) { await session.sendEraseEOF() }
-                }
-                GridRow {
-                    key("Dup", width: 48) { await session.sendDup() }
-                    key("Field", width: 48) { await session.sendFieldMark() }
-                    key("Attn", width: 56) { await session.sendAttn() }
-                }
-                GridRow {
-                    key("SysReq", width: 56) { await session.sendSysReq() }
-                    key("PgUp", width: 48) { session.handleKeyEvent(.pageUp) }
-                    key("PgDn", width: 56) { session.handleKeyEvent(.pageDown) }
-                }
-            }
-
-            Spacer()
         }
-        .padding(8)
-        .background(X3270Colors.panelBackground)
-        .overlay(Rectangle().stroke(X3270Colors.border, lineWidth: 1))
+        .padding(14)
+        .background(X3270Colors.panelBackground.opacity(0.98))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(X3270Colors.border.opacity(0.9), lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
-    private func key(_ title: String, width: CGFloat, action: @escaping () async -> Void) -> some View {
+    private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(X3270Colors.mutedText)
+                .textCase(.uppercase)
+
+            content()
+        }
+    }
+
+    private func spacerKey() -> some View {
+        Color.clear
+            .frame(width: 58, height: 27)
+    }
+
+    private func key(_ title: String, prominent: Bool = false, action: @escaping () async -> Void) -> some View {
         Button {
             Task { await action() }
         } label: {
             Text(title)
-                .font(.system(size: 11))
-                .foregroundStyle(X3270Colors.primaryText)
-                .frame(width: width, height: 24)
-                .background(X3270Colors.controlBackground)
+                .font(.system(size: 11, weight: prominent ? .semibold : .medium))
+                .foregroundStyle(prominent ? X3270Colors.selectedText : X3270Colors.primaryText)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .frame(width: 58, height: 27)
+                .background(prominent ? X3270Colors.accent : X3270Colors.controlBackground)
                 .overlay(
                     RoundedRectangle(cornerRadius: 6)
-                        .stroke(X3270Colors.border.opacity(0.8), lineWidth: 1)
+                        .stroke(prominent ? X3270Colors.accent.opacity(0.5) : X3270Colors.border.opacity(0.7), lineWidth: 1)
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 6))
-        }
+                .contentShape(RoundedRectangle(cornerRadius: 6))
+            }
         .buttonStyle(.plain)
     }
 }
