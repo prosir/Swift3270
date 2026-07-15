@@ -67,7 +67,9 @@ final class KeyCaptureNSView: NSView {
     var onPaste: ((String) -> Void)?
     var onEvent: ((TerminalKeyEvent) -> Void)?
     private var selectionAnchor: (row: Int, column: Int)?
+    private var mouseDownPoint: NSPoint?
     private var didDragSelection = false
+    private let selectionDragThreshold: CGFloat = 4
 
     override var acceptsFirstResponder: Bool { true }
 
@@ -83,14 +85,18 @@ final class KeyCaptureNSView: NSView {
         let point = convert(event.locationInWindow, from: nil)
         if let position = terminalPosition(for: point) {
             selectionAnchor = position
+            mouseDownPoint = point
             didDragSelection = false
-            onEvent?(.selectionStarted(row: position.row, column: position.column))
         }
     }
 
     override func mouseDragged(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+        guard didDragSelection || hasMovedPastSelectionThreshold(point) else { return }
         guard let position = terminalPosition(for: point) else { return }
+        if !didDragSelection, let anchor = selectionAnchor {
+            onEvent?(.selectionStarted(row: anchor.row, column: anchor.column))
+        }
         didDragSelection = true
         onEvent?(.selectionChanged(row: position.row, column: position.column))
     }
@@ -98,14 +104,16 @@ final class KeyCaptureNSView: NSView {
     override func mouseUp(with event: NSEvent) {
         defer {
             selectionAnchor = nil
+            mouseDownPoint = nil
             didDragSelection = false
         }
 
-        guard let anchor = selectionAnchor else { return }
         if didDragSelection {
             onEvent?(.selectionEnded)
         } else {
-            onEvent?(.moveCursor(row: anchor.row, column: anchor.column))
+            let point = convert(event.locationInWindow, from: nil)
+            guard let position = terminalPosition(for: point) ?? selectionAnchor else { return }
+            onEvent?(.moveCursor(row: position.row, column: position.column))
         }
     }
 
@@ -213,5 +221,11 @@ final class KeyCaptureNSView: NSView {
             row: min(rows - 1, max(0, Int(y / lineHeight))),
             column: min(columns - 1, max(0, Int(x / cellWidth)))
         )
+    }
+
+    private func hasMovedPastSelectionThreshold(_ point: NSPoint) -> Bool {
+        guard let mouseDownPoint else { return false }
+        return abs(point.x - mouseDownPoint.x) >= selectionDragThreshold ||
+            abs(point.y - mouseDownPoint.y) >= selectionDragThreshold
     }
 }

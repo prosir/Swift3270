@@ -133,6 +133,9 @@ private struct X3270TerminalPane: View {
             selection = TerminalSelection(anchor: current.anchor, focus: TerminalCursor(row: row, column: column))
         case .selectionEnded:
             break
+        case .moveCursor:
+            selection = nil
+            session.handleKeyEvent(event)
         case .text:
             selection = nil
             session.handleKeyEvent(event)
