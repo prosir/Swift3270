@@ -12,12 +12,12 @@ mkdir -p "$ROOT_DIR/.build/cache" "$ROOT_DIR/.build/module-cache"
 export SWIFTPM_HOME="$ROOT_DIR/.build/cache"
 export CLANG_MODULE_CACHE_PATH="$ROOT_DIR/.build/module-cache"
 
-SWIFT_BUILD_ARGS=()
+SWIFT_BUILD_ARGS=""
 if [[ "${SWIFT3270_DISABLE_SWIFTPM_SANDBOX:-0}" == "1" ]]; then
-  SWIFT_BUILD_ARGS+=(--disable-sandbox)
+  SWIFT_BUILD_ARGS="--disable-sandbox"
 fi
 
-swift build ${SWIFT_BUILD_ARGS[@]} -c release --cache-path "$ROOT_DIR/.build/cache"
+swift build ${SWIFT_BUILD_ARGS:+$SWIFT_BUILD_ARGS} -c release --cache-path "$ROOT_DIR/.build/cache"
 
 rm -rf "$APP_DIR"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
