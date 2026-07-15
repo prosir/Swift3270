@@ -252,6 +252,8 @@ final class TerminalSession: ObservableObject, Identifiable {
             case .moveCursor(let row, let column):
                 await flushDirectText()
                 await send(label: "MoveCursor") { try await backend.moveCursor(row: row, column: column) }
+            case .selectionStarted, .selectionChanged, .selectionEnded:
+                break
             case .reset:
                 await flushDirectText()
                 await send(label: "Reset") { try await backend.reset() }

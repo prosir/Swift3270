@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct ContentView: View {
@@ -69,6 +70,7 @@ private struct X3270TerminalPane: View {
     @Binding var showConnectDialog: Bool
     @Binding var showNewSessionDialog: Bool
     @Binding var showEditSessionDialog: Bool
+    @State private var selection: TerminalSelection?
 
     var body: some View {
         GeometryReader { geometry in
@@ -84,16 +86,24 @@ private struct X3270TerminalPane: View {
                 cells: session.screenCells,
                 fontSize: fittedSize,
                 cursor: session.cursor,
-                theme: terminalTheme
+                theme: terminalTheme,
+                selection: selection
             )
             .overlay(
                 TerminalKeyboardCaptureView(
                     fontSize: fittedSize,
                     rows: session.rows,
-                    columns: session.columns
-                ) { event in
-                    session.handleKeyEvent(event)
-                }
+                    columns: session.columns,
+                    onCopy: {
+                    copySelectionToClipboard()
+                    },
+                    onPaste: { text in
+                        pasteText(text)
+                    },
+                    onEvent: { event in
+                        handleTerminalEvent(event)
+                    }
+                )
             )
             .padding(10)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -111,6 +121,69 @@ private struct X3270TerminalPane: View {
             }
             .animation(.easeInOut(duration: 0.18), value: session.isConnected)
         }
+    }
+
+    private func handleTerminalEvent(_ event: TerminalKeyEvent) {
+        switch event {
+        case .selectionStarted(let row, let column):
+            let cursor = TerminalCursor(row: row, column: column)
+            selection = TerminalSelection(anchor: cursor, focus: cursor)
+        case .selectionChanged(let row, let column):
+            guard let current = selection else { return }
+            selection = TerminalSelection(anchor: current.anchor, focus: TerminalCursor(row: row, column: column))
+        case .selectionEnded:
+            break
+        case .text:
+            selection = nil
+            session.handleKeyEvent(event)
+        default:
+            session.handleKeyEvent(event)
+        }
+    }
+
+    private func copySelectionToClipboard() {
+        let text = selectedText()
+        guard !text.isEmpty else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+    }
+
+    private func pasteText(_ text: String) {
+        selection = nil
+        let normalized = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .replacingOccurrences(of: "\n", with: "\r")
+        Task { await session.sendText(normalized) }
+    }
+
+    private func selectedText() -> String {
+        guard let selection else {
+            return fullScreenText()
+        }
+
+        let range = selection.normalized
+        let rows = session.screenCells
+        guard !rows.isEmpty else { return "" }
+
+        return (range.start.row...range.end.row).compactMap { row in
+            guard row >= 0, row < rows.count else { return nil }
+            let rowCells = rows[row]
+            let startColumn = row == range.start.row ? range.start.column : 0
+            let endColumn = row == range.end.row ? range.end.column : rowCells.count - 1
+            guard startColumn <= endColumn, startColumn < rowCells.count else { return "" }
+            let safeEnd = min(endColumn, rowCells.count - 1)
+            return String(rowCells[startColumn...safeEnd].map(\.character)).trimmedRight()
+        }
+        .joined(separator: "\n")
+    }
+
+    private func fullScreenText() -> String {
+        session.screenCells
+            .map { String($0.map(\.character)).trimmedRight() }
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
@@ -1268,6 +1341,16 @@ private extension View {
                     .stroke(X3270Colors.border, lineWidth: 1)
             )
             .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private extension String {
+    func trimmedRight() -> String {
+        var text = self
+        while text.last == " " {
+            text.removeLast()
+        }
+        return text
     }
 }
 

@@ -5,11 +5,12 @@ struct TerminalGridView: View {
     let fontSize: CGFloat
     let cursor: TerminalCursor
     let theme: TerminalTheme
+    let selection: TerminalSelection?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(normalizedCells.enumerated()), id: \.offset) { row, rowCells in
-                TerminalLineView(cells: rowCells, row: row, fontSize: fontSize, cursor: cursor, theme: theme)
+                TerminalLineView(cells: rowCells, row: row, fontSize: fontSize, cursor: cursor, theme: theme, selection: selection)
                     .frame(height: TerminalMetrics.lineHeight(fontSize))
             }
         }
@@ -38,20 +39,32 @@ private struct TerminalLineView: View {
     let fontSize: CGFloat
     let cursor: TerminalCursor
     let theme: TerminalTheme
+    let selection: TerminalSelection?
 
     var body: some View {
         HStack(spacing: 0) {
             ForEach(cells) { cell in
                 let column = cell.column
                 let isCursor = cursor.row == row && cursor.column == column
+                let isSelected = selection?.contains(row: row, column: column) == true
 
                 Text(String(cell.character))
                     .font(.system(size: fontSize, weight: .regular, design: .monospaced))
-                    .foregroundStyle(isCursor ? theme.palette.cursorText : foreground(for: cell))
+                    .foregroundStyle(textColor(for: cell, isCursor: isCursor, isSelected: isSelected))
                     .frame(width: TerminalMetrics.cellWidth(fontSize), height: TerminalMetrics.lineHeight(fontSize))
-                    .background(background(for: cell, isCursor: isCursor))
+                    .background(background(for: cell, isCursor: isCursor, isSelected: isSelected))
             }
         }
+    }
+
+    private func textColor(for cell: TerminalCell, isCursor: Bool, isSelected: Bool) -> Color {
+        if isCursor {
+            return theme.palette.cursorText
+        }
+        if isSelected {
+            return Color.black
+        }
+        return foreground(for: cell)
     }
 
     private func foreground(for cell: TerminalCell) -> Color {
@@ -62,9 +75,13 @@ private struct TerminalLineView: View {
         return mapped ?? theme.palette.normal
     }
 
-    private func background(for cell: TerminalCell, isCursor: Bool) -> Color {
+    private func background(for cell: TerminalCell, isCursor: Bool, isSelected: Bool) -> Color {
         if isCursor {
             return theme.palette.cursor
+        }
+
+        if isSelected {
+            return Color(red: 0.74, green: 0.90, blue: 1.00)
         }
 
         if cell.hasGraphicRendition("reverse") {

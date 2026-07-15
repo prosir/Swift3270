@@ -5,6 +5,8 @@ struct TerminalKeyboardCaptureView: NSViewRepresentable {
     let fontSize: CGFloat
     let rows: Int
     let columns: Int
+    var onCopy: () -> Void
+    var onPaste: (String) -> Void
     var onEvent: (TerminalKeyEvent) -> Void
 
     func makeNSView(context: Context) -> KeyCaptureNSView {
@@ -12,6 +14,8 @@ struct TerminalKeyboardCaptureView: NSViewRepresentable {
         view.fontSize = fontSize
         view.rows = rows
         view.columns = columns
+        view.onCopy = onCopy
+        view.onPaste = onPaste
         view.onEvent = onEvent
         DispatchQueue.main.async {
             view.window?.makeFirstResponder(view)
@@ -23,6 +27,8 @@ struct TerminalKeyboardCaptureView: NSViewRepresentable {
         nsView.fontSize = fontSize
         nsView.rows = rows
         nsView.columns = columns
+        nsView.onCopy = onCopy
+        nsView.onPaste = onPaste
         nsView.onEvent = onEvent
     }
 }
@@ -47,6 +53,9 @@ enum TerminalKeyEvent {
     case attn
     case sysReq
     case moveCursor(row: Int, column: Int)
+    case selectionStarted(row: Int, column: Int)
+    case selectionChanged(row: Int, column: Int)
+    case selectionEnded
     case pf(Int)
 }
 
@@ -54,7 +63,11 @@ final class KeyCaptureNSView: NSView {
     var fontSize: CGFloat = 16
     var rows: Int = 24
     var columns: Int = 80
+    var onCopy: (() -> Void)?
+    var onPaste: ((String) -> Void)?
     var onEvent: ((TerminalKeyEvent) -> Void)?
+    private var selectionAnchor: (row: Int, column: Int)?
+    private var didDragSelection = false
 
     override var acceptsFirstResponder: Bool { true }
 
@@ -69,12 +82,45 @@ final class KeyCaptureNSView: NSView {
         window?.makeFirstResponder(self)
         let point = convert(event.locationInWindow, from: nil)
         if let position = terminalPosition(for: point) {
-            onEvent?(.moveCursor(row: position.row, column: position.column))
+            selectionAnchor = position
+            didDragSelection = false
+            onEvent?(.selectionStarted(row: position.row, column: position.column))
+        }
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        guard let position = terminalPosition(for: point) else { return }
+        didDragSelection = true
+        onEvent?(.selectionChanged(row: position.row, column: position.column))
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        defer {
+            selectionAnchor = nil
+            didDragSelection = false
+        }
+
+        guard let anchor = selectionAnchor else { return }
+        if didDragSelection {
+            onEvent?(.selectionEnded)
+        } else {
+            onEvent?(.moveCursor(row: anchor.row, column: anchor.column))
         }
     }
 
     override func keyDown(with event: NSEvent) {
         if event.modifierFlags.contains(.command) {
+            if event.charactersIgnoringModifiers?.lowercased() == "c" {
+                onCopy?()
+                return
+            }
+            if event.charactersIgnoringModifiers?.lowercased() == "v" {
+                if let text = NSPasteboard.general.string(forType: .string), !text.isEmpty {
+                    onPaste?(text)
+                }
+                return
+            }
             super.keyDown(with: event)
             return
         }
