@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct TerminalGridView: View {
@@ -214,23 +215,39 @@ enum TerminalTheme: String, CaseIterable, Identifiable {
 }
 
 enum TerminalMetrics {
+    private static let baseFontSize: CGFloat = 16
+    private static let minimumFontSize: CGFloat = 10
+    private static let maximumFitFontSize: CGFloat = 38
+    private static let terminalHorizontalChrome: CGFloat = 36
+    private static let terminalVerticalChrome: CGFloat = 36
+    private static let cellWidthRatio: CGFloat = 0.62
+    private static let lineHeightRatio: CGFloat = 1.28
+
     static func fontSize(container: CGSize, columns: Int, rows: Int, mode: ScaleMode, manualScale: Double) -> CGFloat {
         if mode == .manual {
-            return CGFloat(16 * manualScale)
+            return snap(CGFloat(baseFontSize * manualScale))
         }
 
-        let horizontalPadding: CGFloat = 64
-        let verticalPadding: CGFloat = 72
-        let candidateByWidth = max(8, (container.width - horizontalPadding) / CGFloat(columns) / 0.62)
-        let candidateByHeight = max(8, (container.height - verticalPadding) / CGFloat(rows) / 1.28)
-        return min(24, max(10, min(candidateByWidth, candidateByHeight)))
+        let columns = max(1, columns)
+        let rows = max(1, rows)
+        let availableWidth = max(1, container.width - terminalHorizontalChrome)
+        let availableHeight = max(1, container.height - terminalVerticalChrome)
+        let candidateByWidth = availableWidth / CGFloat(columns) / cellWidthRatio
+        let candidateByHeight = availableHeight / CGFloat(rows) / lineHeightRatio
+        let fitted = min(maximumFitFontSize, max(minimumFontSize, min(candidateByWidth, candidateByHeight)))
+        return snap(fitted)
     }
 
     static func cellWidth(_ fontSize: CGFloat) -> CGFloat {
-        fontSize * 0.62
+        snap(fontSize * cellWidthRatio)
     }
 
     static func lineHeight(_ fontSize: CGFloat) -> CGFloat {
-        fontSize * 1.28
+        snap(fontSize * lineHeightRatio)
+    }
+
+    private static func snap(_ value: CGFloat) -> CGFloat {
+        let scale = NSScreen.main?.backingScaleFactor ?? 2
+        return (value * scale).rounded(.down) / scale
     }
 }

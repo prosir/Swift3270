@@ -259,6 +259,8 @@ private struct X3270MenuBar: View {
                     Button("16-point Font") { scaleMode = .manual; manualScale = 1.15 }
                     Button("20-point Font") { scaleMode = .manual; manualScale = 1.4 }
                     Button("24-point Font") { scaleMode = .manual; manualScale = 1.65 }
+                    Button("32-point Font") { scaleMode = .manual; manualScale = 2.0 }
+                    Button("36-point Font") { scaleMode = .manual; manualScale = 2.25 }
                     Divider()
                     Button("Auto-fit") { scaleMode = .fit }
                 }
