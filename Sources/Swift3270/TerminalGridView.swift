@@ -4,15 +4,17 @@ import SwiftUI
 struct TerminalGridView: View {
     let cells: [[TerminalCell]]
     let fontSize: CGFloat
+    let lineHeight: CGFloat
     let cursor: TerminalCursor
     let theme: TerminalTheme
     let selection: TerminalSelection?
 
     var body: some View {
         let cellWidth = TerminalMetrics.cellWidth(fontSize)
-        let lineHeight = TerminalMetrics.lineHeight(fontSize)
-        let gridWidth = CGFloat(80) * cellWidth
-        let gridHeight = CGFloat(24) * lineHeight
+        let rowCount = max(1, cells.count)
+        let columnCount = max(1, cells.map(\.count).max() ?? 80)
+        let gridWidth = CGFloat(columnCount) * cellWidth
+        let gridHeight = CGFloat(rowCount) * lineHeight
 
         Canvas { context, _ in
             let rows = normalizedCells
@@ -37,6 +39,13 @@ struct TerminalGridView: View {
                     )
                     text.shading = .color(textColor(for: cell, isCursor: isCursor, isSelected: isSelected))
                     context.draw(text, at: CGPoint(x: rect.midX, y: rect.midY), anchor: .center)
+
+                    if cell.hasGraphicRendition("underscore") || cell.hasGraphicRendition("underline") {
+                        var underline = Path()
+                        underline.move(to: CGPoint(x: rect.minX + 1, y: rect.maxY - 2))
+                        underline.addLine(to: CGPoint(x: rect.maxX - 1, y: rect.maxY - 2))
+                        context.stroke(underline, with: .color(theme.palette.underscore), lineWidth: 1)
+                    }
                 }
             }
         }
@@ -47,7 +56,8 @@ struct TerminalGridView: View {
     }
 
     private var normalizedCells: [[TerminalCell]] {
-        guard cells.count == 24, cells.allSatisfy({ $0.count == 80 }) else {
+        guard !cells.isEmpty, let columns = cells.first?.count, columns > 0,
+              cells.allSatisfy({ $0.count == columns }) else {
             return (0..<24).map { row in
                 (0..<80).map { column in
                     TerminalCell.blank(row: row, column: column, foreground: "blue", background: "neutralBlack")
@@ -244,6 +254,17 @@ enum TerminalMetrics {
 
     static func lineHeight(_ fontSize: CGFloat) -> CGFloat {
         snap(fontSize * lineHeightRatio)
+    }
+
+    static func lineHeight(
+        containerHeight: CGFloat,
+        rows: Int,
+        fontSize: CGFloat,
+        mode: ScaleMode
+    ) -> CGFloat {
+        guard mode == .fit else { return lineHeight(fontSize) }
+        let availableHeight = max(1, containerHeight - 32)
+        return snap(availableHeight / CGFloat(max(1, rows)))
     }
 
     private static func snap(_ value: CGFloat) -> CGFloat {

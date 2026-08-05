@@ -2,6 +2,7 @@ import Foundation
 
 @MainActor
 final class TerminalSession: ObservableObject, Identifiable {
+    private static let preferredModelKey = "Swift3270.preferredTerminalModel"
     let id = UUID()
     @Published var profile: SessionProfile
     @Published private(set) var screenLines: [String] = []
@@ -9,21 +10,53 @@ final class TerminalSession: ObservableObject, Identifiable {
     @Published private(set) var cursor = TerminalCursor(row: 0, column: 0)
     @Published private(set) var statusText = "Disconnected"
     @Published private(set) var isConnected = false
+    @Published private(set) var isConnecting = false
+    @Published var terminalModel: TerminalModel = .model2
+    @Published var activeError: TerminalSessionError?
+    @Published var suggestsExpandedScreen = false
+    @Published private(set) var isUnresponsive = false
+    @Published private(set) var isCollectingSFDII = false
+    @Published var expandedSFDIISnapshot: ExpandedSFDIISnapshot?
 
-    let rows = 24
-    let columns = 80
+    var rows: Int { terminalModel.rows }
+    var columns: Int { terminalModel.columns }
+    var displayRows: Int {
+        guard terminalModel == .model4 else {
+            return rows
+        }
+        let lastUsedRow = screenCells.lastIndex { row in
+            row.contains { $0.character != " " }
+        } ?? 0
+        return lastUsedRow >= TerminalModel.model2.rows
+            ? TerminalModel.model4.rows
+            : TerminalModel.model2.rows
+    }
+
+    var isSFDIITwoPaneScreen: Bool {
+        let upperScreen = screenLines
+            .joined(separator: "\n")
+            .uppercased()
+        let hasPaneHeadings = upperScreen.contains("FIELDS") && upperScreen.contains("FORMAT")
+        let hasNavigation = upperScreen.contains("COMMAND ===>") || upperScreen.contains("SCROLL ===>")
+        return hasPaneHeadings || (upperScreen.contains("FORMAT") && hasNavigation)
+    }
 
     private var backend: B3270Backend
     private var refreshTask: Task<Void, Never>?
     private var directTextBuffer = ""
     private var directTextFlushTask: Task<Void, Never>?
+    private var lastLoggedLayout = ""
     var onProfileChanged: (() -> Void)?
 
     init(profile: SessionProfile) {
+        let savedModel = TerminalModel(
+            rawValue: UserDefaults.standard.integer(forKey: Self.preferredModelKey)
+        ) ?? .model2
         self.profile = profile
-        self.backend = Self.makeBackend(codePage: profile.codePage) { _ in }
+        self.terminalModel = savedModel
+        self.backend = Self.makeBackend(codePage: profile.codePage, model: savedModel) { _ in }
         resetScreenBuffer()
-        backend = Self.makeBackend(codePage: profile.codePage) { [weak self] event in
+        backend = Self.makeBackend(codePage: profile.codePage, model: savedModel) { [weak self] event in
             guard let session = self else { return }
             Task { @MainActor in session.applyScreenEvent(event) }
         }
@@ -43,6 +76,7 @@ final class TerminalSession: ObservableObject, Identifiable {
     }
 
     func connect(spec: String) async {
+        guard !isConnecting else { return }
         let parsed = HostSpec.parse(spec)
         profile.connectionSpec = spec
         profile.host = parsed.host
@@ -51,6 +85,9 @@ final class TerminalSession: ObservableObject, Identifiable {
         onProfileChanged?()
 
         do {
+            isConnecting = true
+            isUnresponsive = false
+            activeError = nil
             statusText = "Connecting to \(spec)..."
             resetScreenBuffer()
             rebuildBackend()
@@ -61,12 +98,14 @@ final class TerminalSession: ObservableObject, Identifiable {
             await loadInitialSnapshot()
         } catch {
             isConnected = false
-            statusText = "Connection failed: \(error.localizedDescription)"
+            reportError(title: "Verbinding mislukt", error: error, recovery: "Controleer host, poort en netwerk en probeer daarna opnieuw.")
             resetScreenBuffer()
         }
+        isConnecting = false
     }
 
     func connect(host: String, port: Int, useTLS: Bool) async {
+        guard !isConnecting else { return }
         let prefix = useTLS ? "L:" : ""
         profile.connectionSpec = "\(prefix)\(host):\(port)"
         profile.host = host
@@ -75,6 +114,9 @@ final class TerminalSession: ObservableObject, Identifiable {
         onProfileChanged?()
 
         do {
+            isConnecting = true
+            isUnresponsive = false
+            activeError = nil
             statusText = "Connecting to \(profile.connectionSpec)..."
             resetScreenBuffer()
             rebuildBackend()
@@ -85,8 +127,133 @@ final class TerminalSession: ObservableObject, Identifiable {
             await loadInitialSnapshot()
         } catch {
             isConnected = false
-            statusText = "Connection failed: \(error.localizedDescription)"
+            reportError(title: "Verbinding mislukt", error: error, recovery: "Controleer host, poort en netwerk en probeer daarna opnieuw.")
             resetScreenBuffer()
+        }
+        isConnecting = false
+    }
+
+    func reconnect() async {
+        await disconnect()
+        await connect()
+    }
+
+    func collectCompleteSFDIIScreen() async {
+        guard isConnected, isSFDIITwoPaneScreen, !isCollectingSFDII else { return }
+        isCollectingSFDII = true
+        statusText = "SFDII-overzicht verzamelen..."
+
+        let visibleFieldRows = Self.extractFields(from: screenLines)
+        var formatRows: [Int: String] = [:]
+        await collectPane(
+            cursorRow: 16,
+            headerToken: "LINE ",
+            maximumPages: 16,
+            extract: { lines in Self.extractFormat(from: lines) },
+            into: &formatRows
+        )
+
+        isCollectingSFDII = false
+        statusText = "SFDII-overzicht verzameld"
+        expandedSFDIISnapshot = ExpandedSFDIISnapshot(
+            fields: visibleFieldRows.sorted { $0.0 < $1.0 }.map(\.1),
+            format: formatRows.sorted { $0.key < $1.key }.map(\.value)
+        )
+    }
+
+    private func collectPane(
+        cursorRow: Int,
+        headerToken: String,
+        maximumPages: Int,
+        extract: ([String]) -> [(Int, String)],
+        into collected: inout [Int: String]
+    ) async {
+        try? await backend.moveCursor(row: cursorRow, column: 0)
+        await waitForScreenUpdate()
+
+        var visitedStarts = Set<Int>()
+        for _ in 0..<maximumPages {
+            let lines = screenLines
+            for (index, text) in extract(lines) where collected[index] == nil {
+                collected[index] = text
+            }
+            guard let start = Self.position(in: lines, token: headerToken),
+                  !visitedStarts.contains(start) else { break }
+            visitedStarts.insert(start)
+            guard start > 1 else { break }
+            try? await backend.pf(7)
+            await waitForScreenUpdate()
+        }
+
+        visitedStarts.removeAll()
+        for _ in 0..<maximumPages {
+            let lines = screenLines
+            for (index, text) in extract(lines) where collected[index] == nil {
+                collected[index] = text
+            }
+            guard let start = Self.position(in: lines, token: headerToken),
+                  !visitedStarts.contains(start) else { break }
+            visitedStarts.insert(start)
+            try? await backend.pf(8)
+            await waitForScreenUpdate()
+        }
+
+        for _ in 0..<maximumPages {
+            guard (Self.position(in: screenLines, token: headerToken) ?? 1) > 1 else { break }
+            try? await backend.pf(7)
+            await waitForScreenUpdate()
+        }
+    }
+
+    private func waitForScreenUpdate() async {
+        try? await Task.sleep(for: .milliseconds(180))
+    }
+
+    private static func position(in lines: [String], token: String) -> Int? {
+        let text = lines.joined(separator: " ").uppercased()
+        guard let tokenRange = text.range(of: token) else { return nil }
+        let suffix = text[tokenRange.upperBound...]
+        let digits = suffix.drop(while: { !$0.isNumber }).prefix(while: \.isNumber)
+        return Int(digits)
+    }
+
+    private static func extractFields(from lines: [String]) -> [(Int, String)] {
+        guard let header = lines.firstIndex(where: { $0.uppercased().contains("ROW ") }),
+              let format = lines.firstIndex(where: { $0.uppercased().contains("FORMAT") }),
+              let start = position(in: lines, token: "ROW ") else { return [] }
+        return lines[(header + 2)..<format].enumerated().compactMap { offset, line in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            return trimmed.isEmpty ? nil : (start + offset, trimmed)
+        }
+    }
+
+    private static func extractFormat(from lines: [String]) -> [(Int, String)] {
+        guard let header = lines.firstIndex(where: { $0.uppercased().contains("LINE ") }),
+              let command = lines.firstIndex(where: { $0.uppercased().contains("COMMAND ===>") }),
+              command > header + 2,
+              let start = position(in: lines, token: "LINE ") else { return [] }
+        return lines[(header + 2)..<command].enumerated().compactMap { offset, line in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            return trimmed.isEmpty ? nil : (start + offset, trimmed)
+        }
+    }
+
+    func setTerminalModel(_ model: TerminalModel, reconnect: Bool = false) async {
+        guard terminalModel != model else { return }
+        if isConnected {
+            statusText = "Model kan tijdens een actieve hostverbinding niet veilig worden gewijzigd"
+            activeError = TerminalSessionError(
+                title: "Modelwijziging geblokkeerd",
+                message: "De host heeft de huidige 3270-afmetingen bij het verbinden vastgelegd.",
+                recovery: "De sessie blijft verbonden en ongewijzigd. Gebruik Scherm vergroten om alleen het venster te vergroten."
+            )
+        } else {
+            terminalModel = model
+            UserDefaults.standard.set(model.rawValue, forKey: Self.preferredModelKey)
+            suggestsExpandedScreen = false
+            resetScreenBuffer()
+            rebuildBackend()
+            statusText = "Scherm ingesteld op \(model.dimensions)"
         }
     }
 
@@ -97,6 +264,8 @@ final class TerminalSession: ObservableObject, Identifiable {
         directTextFlushTask = nil
         await backend.stop()
         isConnected = false
+        isConnecting = false
+        isUnresponsive = false
         statusText = "Disconnected"
         resetScreenBuffer()
         rebuildBackend()
@@ -142,7 +311,7 @@ final class TerminalSession: ObservableObject, Identifiable {
     }
 
     private func rebuildBackend() {
-        backend = Self.makeBackend(codePage: profile.codePage) { [weak self] event in
+        backend = Self.makeBackend(codePage: profile.codePage, model: terminalModel) { [weak self] event in
             guard let session = self else { return }
             Task { @MainActor in
                 session.applyScreenEvent(event)
@@ -283,7 +452,7 @@ final class TerminalSession: ObservableObject, Identifiable {
         do {
             try await backend.sendText(text)
         } catch {
-            statusText = "Type failed: \(error.localizedDescription)"
+            handleOperationFailure(error, action: "Typen")
         }
     }
 
@@ -296,16 +465,19 @@ final class TerminalSession: ObservableObject, Identifiable {
         do {
             try await operation()
         } catch {
-            statusText = "Command failed: \(error.localizedDescription)"
+            handleOperationFailure(error, action: label)
         }
     }
 
     private static func makeBackend(
         codePage: String,
+        model: TerminalModel = .model2,
         screenEventHandler: @escaping @Sendable (B3270ScreenEvent) -> Void
     ) -> B3270Backend {
         B3270Backend(
             codePage: codePage,
+            model: model.rawValue,
+            oversize: nil,
             screenEventHandler: screenEventHandler
         )
     }
@@ -346,6 +518,12 @@ final class TerminalSession: ObservableObject, Identifiable {
                         guard column < columns else { break }
                         cells[rowChange.row][column].character = character
                     }
+                } else if let count = change.count {
+                    for offset in 0..<count {
+                        let column = change.column + offset
+                        guard column < columns else { break }
+                        cells[rowChange.row][column].character = " "
+                    }
                 }
             }
         }
@@ -385,7 +563,7 @@ final class TerminalSession: ObservableObject, Identifiable {
                 ScreenParser.lines(from: ascii.joined(separator: "\n"), rows: rows, columns: columns)
             )
         } catch {
-            statusText = "Initial screen load failed: \(error.localizedDescription)"
+            reportError(title: "Scherm kon niet worden geladen", error: error, recovery: "Kies Reconnect om het scherm opnieuw op te halen.")
         }
     }
 
@@ -411,6 +589,34 @@ final class TerminalSession: ObservableObject, Identifiable {
     private func setScreenCells(_ cells: [[TerminalCell]]) {
         screenCells = cells
         screenLines = cells.map { row in String(row.map(\.character)) }
+        logCurrentLayoutIfChanged()
+    }
+
+    private func logCurrentLayoutIfChanged() {
+        let nonEmptyRows = screenLines.indices.filter {
+            !screenLines[$0].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        let usedRange = nonEmptyRows.first.map { first in
+            "\(first + 1)-\((nonEmptyRows.last ?? first) + 1)"
+        } ?? "geen"
+        let layout = "model=\(terminalModel.rawValue) host=\(columns)x\(rows) usedRows=\(usedRange) visibleRows=\(displayRows) sfdiTwoPane=\(isSFDIITwoPaneScreen)"
+        guard layout != lastLoggedLayout else { return }
+        lastLoggedLayout = layout
+
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let visibleLines = screenLines.enumerated().compactMap { index, line -> String? in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            return trimmed.isEmpty ? nil : String(format: "%02d: %@", index + 1, trimmed)
+        }.joined(separator: "\n")
+        let entry = "[\(timestamp)] \(layout)\n\(visibleLines)\n---\n"
+        let url = URL(fileURLWithPath: "/tmp/Swift3270-screen.log")
+        if let handle = try? FileHandle(forWritingTo: url) {
+            defer { try? handle.close() }
+            try? handle.seekToEnd()
+            try? handle.write(contentsOf: Data(entry.utf8))
+        } else {
+            try? Data(entry.utf8).write(to: url, options: .atomic)
+        }
     }
 
     private func applyTextSnapshotPreservingAttributes(_ lines: [String]) {
@@ -445,9 +651,82 @@ final class TerminalSession: ObservableObject, Identifiable {
 
         return screenCells
     }
+
+    private func reportError(title: String, error: Error, recovery: String) {
+        let message = error.localizedDescription
+        statusText = "\(title): \(message)"
+        activeError = TerminalSessionError(title: title, message: message, recovery: recovery)
+    }
+
+    private func handleOperationFailure(_ error: Error, action: String) {
+        let backendStopped: Bool
+        switch error {
+        case B3270Error.timeout, B3270Error.notRunning:
+            backendStopped = true
+        default:
+            backendStopped = false
+        }
+
+        if backendStopped {
+            isUnresponsive = true
+            isConnected = false
+            statusText = "Sessie reageert niet"
+            activeError = TerminalSessionError(
+                title: "Sessie reageert niet",
+                message: "Swift3270 kreeg geen antwoord op ‘\(action)’: \(error.localizedDescription)",
+                recovery: "De sessie lijkt vastgelopen. Kies Reconnect om de verbinding veilig opnieuw op te bouwen."
+            )
+        } else {
+            reportError(
+                title: "Opdracht mislukt",
+                error: error,
+                recovery: "De verbinding is nog actief. Probeer Reset als het scherm niet reageert."
+            )
+        }
+    }
 }
 
 struct TerminalCursor: Equatable {
     let row: Int
     let column: Int
+}
+
+enum TerminalModel: Int, CaseIterable, Identifiable {
+    case model2 = 2
+    case model3 = 3
+    case model4 = 4
+    case model5 = 5
+    case oversize62 = 62
+
+    var id: Int { rawValue }
+    var rows: Int {
+        switch self {
+        case .model2: return 24
+        case .model3: return 32
+        case .model4: return 43
+        case .model5: return 27
+        case .oversize62: return 62
+        }
+    }
+    var columns: Int { self == .model5 ? 132 : 80 }
+    var dimensions: String { "\(rows)×\(columns)" }
+    var label: String {
+        if self == .oversize62 {
+            return "Oversize (80×62) — beide lijsten"
+        }
+        return "Model \(rawValue) (\(columns)×\(rows))"
+    }
+}
+
+struct TerminalSessionError: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
+    let recovery: String
+}
+
+struct ExpandedSFDIISnapshot: Identifiable {
+    let id = UUID()
+    let fields: [String]
+    let format: [String]
 }

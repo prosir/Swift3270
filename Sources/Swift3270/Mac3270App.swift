@@ -8,7 +8,7 @@ struct Swift3270App: App {
         WindowGroup {
             ContentView()
                 .environmentObject(sessionStore)
-                .frame(minWidth: 1120, minHeight: 720)
+                .frame(minWidth: 1280, minHeight: 850)
         }
         .windowStyle(.hiddenTitleBar)
         .commands {

@@ -9,14 +9,20 @@ actor B3270Backend {
     private var pendingRunResults: [Result<B3270RunResult, Error>] = []
     private var commandInFlight = false
     private let codePage: String
+    private let model: Int
+    private let oversize: String?
     private let screenEventHandler: @Sendable (B3270ScreenEvent) -> Void
 
     init(
         codePage: String = "cp037",
+        model: Int = 4,
+        oversize: String? = nil,
         screenEventHandler: @escaping @Sendable (B3270ScreenEvent) -> Void = { _ in }
     ) {
         let override = ProcessInfo.processInfo.environment["SWIFT3270_CODEPAGE"]?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.codePage = override?.isEmpty == false ? override! : codePage
+        self.model = model
+        self.oversize = oversize
         self.screenEventHandler = screenEventHandler
     }
 
@@ -32,7 +38,12 @@ actor B3270Backend {
         let errorOutput = Pipe()
 
         process.executableURL = executableURL
-        process.arguments = ["-json", "-nowrapperdoc", "-model", "2", "-utf8", "-codepage", codePage]
+        var arguments = ["-json", "-nowrapperdoc", "-model", "\(model)"]
+        if let oversize {
+            arguments += ["-oversize", oversize]
+        }
+        arguments += ["-utf8", "-codepage", codePage]
+        process.arguments = arguments
         process.standardInput = input
         process.standardOutput = output
         process.standardError = errorOutput
@@ -67,6 +78,10 @@ actor B3270Backend {
 
     func connect(spec: String) async throws {
         _ = try await run(action: "Connect", args: [spec], timeout: 45.0)
+    }
+
+    func setModel(_ model: Int) async throws {
+        _ = try await run(action: "Set", args: ["model", "\(model)"])
     }
 
     func ascii() async throws -> [String] {

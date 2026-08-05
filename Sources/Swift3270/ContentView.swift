@@ -62,11 +62,29 @@ struct ContentView: View {
         .sheet(item: $updateChecker.availableUpdate) { update in
             X3270UpdateDialog(update: update)
         }
+        .alert(item: activeErrorBinding) { error in
+            Alert(
+                title: Text(error.title),
+                message: Text("\(error.message)\n\n\(error.recovery)"),
+                primaryButton: .default(Text("Reconnect")) {
+                    Task { await store.selectedSession.reconnect() }
+                },
+                secondaryButton: .cancel(Text("Sluiten"))
+            )
+        }
         .task {
             await updateChecker.checkForUpdates()
         }
         .preferredColorScheme(.dark)
     }
+
+    private var activeErrorBinding: Binding<TerminalSessionError?> {
+        Binding(
+            get: { store.selectedSession.activeError },
+            set: { store.selectedSession.activeError = $0 }
+        )
+    }
+
 }
 
 private struct X3270TerminalPane: View {
@@ -84,14 +102,21 @@ private struct X3270TerminalPane: View {
             let fittedSize = TerminalMetrics.fontSize(
                 container: geometry.size,
                 columns: session.columns,
-                rows: session.rows,
+                rows: session.displayRows,
                 mode: scaleMode,
                 manualScale: manualScale
             )
+            let fittedLineHeight = TerminalMetrics.lineHeight(
+                containerHeight: geometry.size.height,
+                rows: session.displayRows,
+                fontSize: fittedSize,
+                mode: scaleMode
+            )
 
             TerminalGridView(
-                cells: session.screenCells,
+                cells: Array(session.screenCells.prefix(session.displayRows)),
                 fontSize: fittedSize,
+                lineHeight: fittedLineHeight,
                 cursor: session.cursor,
                 theme: terminalTheme,
                 selection: selection
@@ -99,7 +124,8 @@ private struct X3270TerminalPane: View {
             .overlay(
                 TerminalKeyboardCaptureView(
                     fontSize: fittedSize,
-                    rows: session.rows,
+                    lineHeight: fittedLineHeight,
+                    rows: session.displayRows,
                     columns: session.columns,
                     onCopy: {
                     copySelectionToClipboard()
@@ -260,7 +286,6 @@ private struct X3270MenuBar: View {
                     Toggle("Line Wrap", isOn: .constant(false))
                     Toggle("Overlay Paste", isOn: .constant(true))
                     Toggle("Typeahead", isOn: .constant(true))
-                    Toggle("Reconnect", isOn: .constant(false))
                 }
                 Menu("Fonts") {
                     Button("8-point Font") { scaleMode = .manual; manualScale = 0.7 }
@@ -275,11 +300,17 @@ private struct X3270MenuBar: View {
                     Button("Auto-fit") { scaleMode = .fit }
                 }
                 Menu("Models") {
-                    Button("Model 2 24x80") {}
-                    Button("Model 3 32x80") {}
-                    Button("Model 4 43x80") {}
-                    Button("Model 5 27x132") {}
-                    Button("Oversize...") {}
+                    ForEach(TerminalModel.allCases) { model in
+                        Button {
+                            Task { await session.setTerminalModel(model) }
+                        } label: {
+                            if session.terminalModel == model {
+                                Label(model.label, systemImage: "checkmark")
+                            } else {
+                                Text(model.label)
+                            }
+                        }
+                    }
                 }
                 Menu("Code Page") {
                     Button("cp037 US/International") { session.setCodePage("cp037") }
@@ -300,7 +331,11 @@ private struct X3270MenuBar: View {
             }
 
             Button {
-                showConnectDialog = true
+                if session.isConnected {
+                    Task { await session.reconnect() }
+                } else {
+                    showConnectDialog = true
+                }
             } label: {
                 Label(session.isConnected ? "Reconnect" : "Connect", systemImage: "bolt.horizontal.fill")
                     .font(.system(size: 12, weight: .semibold))
@@ -310,6 +345,24 @@ private struct X3270MenuBar: View {
             .buttonStyle(.plain)
             .foregroundStyle(.white)
             .background(X3270Colors.accent)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+
+            Button {
+                Task { await session.disconnect() }
+            } label: {
+                Label("Disconnect", systemImage: "xmark.circle.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .padding(.horizontal, 10)
+                    .frame(height: 30)
+            }
+            .buttonStyle(.plain)
+            .disabled(!session.isConnected)
+            .foregroundStyle(session.isConnected ? X3270Colors.primaryText : X3270Colors.mutedText)
+            .background(X3270Colors.controlBackground)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(X3270Colors.border.opacity(0.8), lineWidth: 1)
+            )
             .clipShape(RoundedRectangle(cornerRadius: 8))
 
             Button {
@@ -645,7 +698,8 @@ private struct X3270StatusBar: View {
                 .lineLimit(1)
                 .foregroundStyle(statusColor)
 
-            statusBadge("Model 2")
+            statusBadge("Model \(session.terminalModel.rawValue)")
+            statusBadge("\(session.displayRows) zichtbaar")
             statusBadge("\(session.rows)x\(session.columns)")
             if session.profile.useTLS {
                 statusBadge("TLS")
@@ -661,7 +715,7 @@ private struct X3270StatusBar: View {
 
     private var statusColor: Color {
         let text = session.statusText.lowercased()
-        if text.contains("failed") || text.contains("error") {
+        if text.contains("failed") || text.contains("error") || text.contains("mislukt") || text.contains("kon niet") {
             return X3270Colors.warning
         }
         if session.isConnected {
@@ -747,6 +801,61 @@ private struct X3270UpdateDialog: View {
         .padding(22)
         .frame(width: 520)
         .background(X3270Colors.panelBackground)
+    }
+}
+
+private struct X3270ExpandedSFDIIView: View {
+    @Environment(\.dismiss) private var dismiss
+    let snapshot: ExpandedSFDIISnapshot
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Volledig SFDII-overzicht")
+                        .font(.system(size: 18, weight: .semibold))
+                    Text("Samengevoegd zonder handmatig F7/F8")
+                        .font(.system(size: 12))
+                        .foregroundStyle(X3270Colors.secondaryText)
+                }
+                Spacer()
+                Button("Sluiten") { dismiss() }
+                    .buttonStyle(.borderedProminent)
+                    .tint(X3270Colors.accent)
+            }
+            .padding(16)
+            .background(X3270Colors.panelBackground)
+
+            ScrollView([.horizontal, .vertical]) {
+                VStack(alignment: .leading, spacing: 6) {
+                    terminalHeading("Command ===>                                      Scroll ===> PAGE")
+                    terminalHeading("Fields  . . . . . . . . . . . . . . . . . . . .")
+                    terminalLines(snapshot.fields, color: Color(red: 0.42, green: 1.0, blue: 0.30))
+                    terminalHeading("Format  . . . . . . . . . . . . . . . . . . . .")
+                    terminalLines(snapshot.format, color: Color(red: 0.20, green: 1.0, blue: 1.0))
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .background(Color.black)
+        }
+        .frame(minWidth: 1100, minHeight: 760)
+        .background(X3270Colors.terminalFrame)
+    }
+
+    private func terminalHeading(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 15, design: .monospaced))
+            .foregroundStyle(Color(red: 0.20, green: 1.0, blue: 1.0))
+            .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private func terminalLines(_ lines: [String], color: Color) -> some View {
+        Text(lines.isEmpty ? "Geen regels verzameld." : lines.joined(separator: "\n"))
+            .font(.system(size: 15, design: .monospaced))
+            .foregroundStyle(color)
+            .textSelection(.enabled)
+            .fixedSize(horizontal: true, vertical: false)
     }
 }
 

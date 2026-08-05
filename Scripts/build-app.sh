@@ -10,7 +10,7 @@ APP_VERSION="${SWIFT3270_VERSION:-0.1.1}"
 APP_BUILD="${SWIFT3270_BUILD:-2}"
 
 cd "$ROOT_DIR"
-mkdir -p "$ROOT_DIR/.build/cache" "$ROOT_DIR/.build/module-cache"
+mkdir -p "$ROOT_DIR/.build/cache" "$ROOT_DIR/.build/module-cache" "$ROOT_DIR/.build/icon-module-cache"
 export SWIFTPM_HOME="$ROOT_DIR/.build/cache"
 export CLANG_MODULE_CACHE_PATH="$ROOT_DIR/.build/module-cache"
 
@@ -27,7 +27,8 @@ mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 cp "$ROOT_DIR/.build/release/Swift3270" "$MACOS_DIR/Swift3270"
 chmod +x "$MACOS_DIR/Swift3270"
 
-swift "$ROOT_DIR/Scripts/generate-icon.swift" "$ROOT_DIR/.build"
+CLANG_MODULE_CACHE_PATH="$ROOT_DIR/.build/icon-module-cache" \
+  swift "$ROOT_DIR/Scripts/generate-icon.swift" "$ROOT_DIR/.build"
 if [[ -f "$ROOT_DIR/.build/Swift3270.icns" ]]; then
   cp "$ROOT_DIR/.build/Swift3270.icns" "$RESOURCES_DIR/Swift3270.icns"
 elif ! iconutil --convert icns "$ROOT_DIR/.build/Swift3270.iconset" --output "$RESOURCES_DIR/Swift3270.icns"; then

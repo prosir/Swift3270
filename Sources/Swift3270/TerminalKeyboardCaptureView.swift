@@ -3,6 +3,7 @@ import SwiftUI
 
 struct TerminalKeyboardCaptureView: NSViewRepresentable {
     let fontSize: CGFloat
+    let lineHeight: CGFloat
     let rows: Int
     let columns: Int
     var onCopy: () -> Void
@@ -12,6 +13,7 @@ struct TerminalKeyboardCaptureView: NSViewRepresentable {
     func makeNSView(context: Context) -> KeyCaptureNSView {
         let view = KeyCaptureNSView()
         view.fontSize = fontSize
+        view.lineHeight = lineHeight
         view.rows = rows
         view.columns = columns
         view.onCopy = onCopy
@@ -25,6 +27,7 @@ struct TerminalKeyboardCaptureView: NSViewRepresentable {
 
     func updateNSView(_ nsView: KeyCaptureNSView, context: Context) {
         nsView.fontSize = fontSize
+        nsView.lineHeight = lineHeight
         nsView.rows = rows
         nsView.columns = columns
         nsView.onCopy = onCopy
@@ -61,6 +64,7 @@ enum TerminalKeyEvent {
 
 final class KeyCaptureNSView: NSView {
     var fontSize: CGFloat = 16
+    var lineHeight: CGFloat = 20
     var rows: Int = 24
     var columns: Int = 80
     var onCopy: (() -> Void)?
@@ -209,7 +213,6 @@ final class KeyCaptureNSView: NSView {
 
     private func terminalPosition(for point: NSPoint) -> (row: Int, column: Int)? {
         let cellWidth = TerminalMetrics.cellWidth(fontSize)
-        let lineHeight = TerminalMetrics.lineHeight(fontSize)
         let gridWidth = CGFloat(columns) * cellWidth
         let gridHeight = CGFloat(rows) * lineHeight
         let originX = max(0, (bounds.width - gridWidth) / 2)
