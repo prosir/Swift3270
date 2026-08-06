@@ -46,14 +46,14 @@ jobs:
 
   release:
     name: Package GitHub release
-    if: github.event_name == 'release' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '' && inputs.release_id != '')
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '' && inputs.release_id != '')
     needs: swift
     runs-on: macos-14
     permissions:
       contents: write
     env:
-      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag || 'V0.1.3' }}
-      RELEASE_ID: ${{ github.event.release.id || inputs.release_id || '366124476' }}
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+      RELEASE_ID: ${{ github.event.release.id || inputs.release_id }}
 
     steps:
       - name: Checkout
