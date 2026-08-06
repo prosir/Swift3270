@@ -443,16 +443,17 @@ private struct X3270MenuBar: View {
     @Binding var terminalTheme: TerminalTheme
 
     var body: some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 8) {
+        HStack(spacing: 5) {
+            HStack(spacing: 6) {
                 Image(systemName: "terminal.fill")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(X3270Colors.accent)
                 Text("Swift3270")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(X3270Colors.primaryText)
             }
-            .padding(.trailing, 4)
+            .fixedSize(horizontal: true, vertical: true)
+            .padding(.trailing, 3)
 
             menu("File") {
                 Button("Transfer File...") {}
@@ -574,9 +575,11 @@ private struct X3270MenuBar: View {
                 }
             } label: {
                 Label(session.isConnected ? "Reconnect" : "Connect", systemImage: "bolt.horizontal.fill")
-                    .font(.system(size: 12, weight: .semibold))
-                    .padding(.horizontal, 12)
-                    .frame(height: 30)
+                    .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(1)
+                    .padding(.horizontal, 9)
+                    .frame(height: 26)
+                    .fixedSize(horizontal: true, vertical: false)
             }
             .buttonStyle(.plain)
             .foregroundStyle(.white)
@@ -587,9 +590,11 @@ private struct X3270MenuBar: View {
                 Task { await session.disconnect() }
             } label: {
                 Label("Disconnect", systemImage: "xmark.circle.fill")
-                    .font(.system(size: 12, weight: .semibold))
-                    .padding(.horizontal, 10)
-                    .frame(height: 30)
+                    .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(1)
+                    .padding(.horizontal, 8)
+                    .frame(height: 26)
+                    .fixedSize(horizontal: true, vertical: false)
             }
             .buttonStyle(.plain)
             .disabled(!session.isConnected)
@@ -605,9 +610,11 @@ private struct X3270MenuBar: View {
                 showKeypad.toggle()
             } label: {
                 Label(showKeypad ? "Hide Keys" : "Keys", systemImage: showKeypad ? "sidebar.right" : "keyboard")
-                    .font(.system(size: 12, weight: .medium))
-                    .padding(.horizontal, 10)
-                    .frame(height: 28)
+                    .font(.system(size: 11, weight: .medium))
+                    .lineLimit(1)
+                    .padding(.horizontal, 8)
+                    .frame(height: 26)
+                    .fixedSize(horizontal: true, vertical: false)
             }
             .buttonStyle(.plain)
             .foregroundStyle(showKeypad ? X3270Colors.selectedText : X3270Colors.primaryText)
@@ -619,9 +626,11 @@ private struct X3270MenuBar: View {
                     splitViewEnabled.toggle()
                 } label: {
                     Label(splitViewEnabled ? "Single" : "Split", systemImage: "rectangle.split.2x1")
-                        .font(.system(size: 12, weight: .medium))
-                        .padding(.horizontal, 10)
-                        .frame(height: 28)
+                        .font(.system(size: 11, weight: .medium))
+                        .lineLimit(1)
+                        .padding(.horizontal, 8)
+                        .frame(height: 26)
+                        .fixedSize(horizontal: true, vertical: false)
                 }
                 .buttonStyle(.plain)
                 .disabled(store.sessions.count < 2)
@@ -633,7 +642,7 @@ private struct X3270MenuBar: View {
 
             Spacer(minLength: 0)
 
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 statusPill(
                     title: session.isConnected ? "Connected" : "Offline",
                     color: session.isConnected ? X3270Colors.success : X3270Colors.mutedText
@@ -646,10 +655,11 @@ private struct X3270MenuBar: View {
                     .lineLimit(1)
                     .foregroundStyle(X3270Colors.secondaryText)
             }
-            .padding(.horizontal, 8)
+            .padding(.horizontal, 6)
         }
-        .padding(.horizontal, 10)
-        .frame(height: 42)
+        .controlSize(.small)
+        .padding(.horizontal, 8)
+        .frame(height: 36)
         .background(X3270Colors.topBar)
     }
 
@@ -658,13 +668,17 @@ private struct X3270MenuBar: View {
             content()
         } label: {
             Text(title)
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(X3270Colors.primaryText)
-                .padding(.horizontal, 11)
-                .frame(height: 30)
+                .lineLimit(1)
+                .padding(.horizontal, 8)
+                .frame(height: 26)
+                .fixedSize(horizontal: true, vertical: false)
         }
         .menuStyle(.borderlessButton)
-        .frame(height: 32)
+        .controlSize(.small)
+        .fixedSize(horizontal: true, vertical: true)
+        .frame(height: 28)
         .background(X3270Colors.controlBackground)
         .overlay(
             RoundedRectangle(cornerRadius: 7)
@@ -682,8 +696,8 @@ private struct X3270MenuBar: View {
                 .font(.system(size: 11, weight: .semibold))
         }
         .foregroundStyle(X3270Colors.primaryText)
-        .padding(.horizontal, 9)
-        .frame(height: 24)
+        .padding(.horizontal, 8)
+        .frame(height: 22)
         .background(X3270Colors.controlBackground)
         .overlay(
             RoundedRectangle(cornerRadius: 12)
