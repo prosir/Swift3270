@@ -3,13 +3,28 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var store: SessionStore
+    @EnvironmentObject private var plugins: TerminalPluginStore
     @State private var scaleMode: ScaleMode = .fit
     @State private var manualScale = 1.0
     @State private var showConnectDialog = false
     @State private var showNewSessionDialog = false
     @State private var showEditSessionDialog = false
     @State private var showKeypad = false
+    @State private var showPlugins = false
     @State private var terminalTheme: TerminalTheme = .ibm3279
+    @AppStorage("Swift3270.developerSplit.enabled") private var splitViewEnabled = false
+    @AppStorage("Swift3270.developerSplit.secondaryProfile") private var secondarySessionProfileID = ""
+
+    private var secondarySession: TerminalSession? {
+        let candidates = store.sessions.filter { $0.id != store.selectedSessionID }
+        return candidates.first(where: { $0.profile.id == secondarySessionProfileID }) ?? candidates.first
+    }
+
+    private var showsDeveloperSplit: Bool {
+        splitViewEnabled
+            && plugins.isEnabled(capability: .developerSplit)
+            && secondarySession != nil
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -19,6 +34,9 @@ struct ContentView: View {
                 showNewSessionDialog: $showNewSessionDialog,
                 showEditSessionDialog: $showEditSessionDialog,
                 showKeypad: $showKeypad,
+                showPlugins: $showPlugins,
+                splitViewEnabled: $splitViewEnabled,
+                secondarySessionProfileID: $secondarySessionProfileID,
                 scaleMode: $scaleMode,
                 manualScale: $manualScale,
                 terminalTheme: $terminalTheme
@@ -27,16 +45,14 @@ struct ContentView: View {
             X3270SessionStrip()
 
             HStack(spacing: 0) {
-                X3270TerminalPane(
-                    session: store.selectedSession,
-                    scaleMode: scaleMode,
-                    manualScale: manualScale,
-                    terminalTheme: terminalTheme,
-                    showConnectDialog: $showConnectDialog,
-                    showNewSessionDialog: $showNewSessionDialog,
-                    showEditSessionDialog: $showEditSessionDialog
-                )
-                    .frame(minWidth: 680)
+                terminalColumn(session: store.selectedSession, title: "Links")
+
+                if showsDeveloperSplit, let secondarySession {
+                    Rectangle()
+                        .fill(X3270Colors.border)
+                        .frame(width: 1)
+                    terminalColumn(session: secondarySession, title: "Rechts")
+                }
 
                 if showKeypad {
                     X3270KeypadPanel(session: store.selectedSession, showKeypad: $showKeypad)
@@ -58,6 +74,10 @@ struct ContentView: View {
         .sheet(isPresented: $showEditSessionDialog) {
             X3270EditSessionDialog(session: store.selectedSession)
         }
+        .sheet(isPresented: $showPlugins) {
+            X3270PluginsDialog()
+                .environmentObject(plugins)
+        }
         .alert(item: activeErrorBinding) { error in
             Alert(
                 title: Text(error.title),
@@ -69,6 +89,37 @@ struct ContentView: View {
             )
         }
         .preferredColorScheme(.dark)
+        .onAppear { normalizeSecondarySession() }
+        .onChange(of: store.selectedSessionID) { _ in normalizeSecondarySession() }
+        .onChange(of: store.sessions.map(\.profile.id)) { _ in normalizeSecondarySession() }
+    }
+
+    @ViewBuilder
+    private func terminalColumn(session: TerminalSession, title: String) -> some View {
+        VStack(spacing: 0) {
+            if showsDeveloperSplit {
+                X3270SplitPaneHeader(title: title, session: session)
+            }
+            X3270TerminalPane(
+                session: session,
+                scaleMode: scaleMode,
+                manualScale: manualScale,
+                terminalTheme: terminalTheme,
+                showConnectDialog: $showConnectDialog,
+                showNewSessionDialog: $showNewSessionDialog,
+                showEditSessionDialog: $showEditSessionDialog
+            )
+        }
+        .frame(minWidth: showsDeveloperSplit ? 420 : 680)
+    }
+
+    private func normalizeSecondarySession() {
+        guard let session = secondarySession else {
+            secondarySessionProfileID = ""
+            splitViewEnabled = false
+            return
+        }
+        secondarySessionProfileID = session.profile.id
     }
 
     private var activeErrorBinding: Binding<TerminalSessionError?> {
@@ -80,7 +131,35 @@ struct ContentView: View {
 
 }
 
+private struct X3270SplitPaneHeader: View {
+    let title: String
+    @ObservedObject var session: TerminalSession
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Circle()
+                .fill(session.isConnected ? X3270Colors.success : X3270Colors.mutedText)
+                .frame(width: 7, height: 7)
+            Text(title)
+                .foregroundStyle(X3270Colors.mutedText)
+            Text(session.displayName)
+                .fontWeight(.semibold)
+                .foregroundStyle(X3270Colors.primaryText)
+                .lineLimit(1)
+            Spacer()
+            Text("Regel \(max(0, session.cursor.row) + 1) · Kolom \(max(0, session.cursor.column) + 1)")
+                .monospacedDigit()
+                .foregroundStyle(X3270Colors.secondaryText)
+        }
+        .font(.system(size: 11))
+        .padding(.horizontal, 10)
+        .frame(height: 28)
+        .background(X3270Colors.panelBackground)
+    }
+}
+
 private struct X3270TerminalPane: View {
+    @EnvironmentObject private var plugins: TerminalPluginStore
     @ObservedObject var session: TerminalSession
     let scaleMode: ScaleMode
     let manualScale: Double
@@ -95,7 +174,9 @@ private struct X3270TerminalPane: View {
     @FocusState private var searchFocused: Bool
 
     private var activeCells: [[TerminalCell]] {
-        guard historyOffset > 0, historyOffset <= session.screenHistory.count else {
+        guard plugins.isEnabled(capability: .screenHistory),
+              historyOffset > 0,
+              historyOffset <= session.screenHistory.count else {
             return session.screenCells
         }
         return session.screenHistory[session.screenHistory.count - historyOffset].cells
@@ -135,6 +216,7 @@ private struct X3270TerminalPane: View {
                     lineHeight: fittedLineHeight,
                     rows: displayedRows,
                     columns: session.columns,
+                    capabilities: plugins.activeCapabilities,
                     onCopy: {
                     copySelectionToClipboard()
                     },
@@ -156,7 +238,7 @@ private struct X3270TerminalPane: View {
                 )
             )
             .overlay(alignment: .topTrailing) {
-                if showSearch {
+                if showSearch, plugins.isEnabled(capability: .hostSearch) {
                     HStack(spacing: 8) {
                         Image(systemName: "magnifyingglass")
                         TextField("Zoeken", text: $searchText)
@@ -208,7 +290,7 @@ private struct X3270TerminalPane: View {
                 }
             }
             .overlay(alignment: .topLeading) {
-                if historyOffset > 0 {
+                if historyOffset > 0, plugins.isEnabled(capability: .screenHistory) {
                     HStack(spacing: 8) {
                         Text("Geschiedenis −\(historyOffset)")
                         Button("Live") { historyOffset = 0 }
@@ -238,6 +320,18 @@ private struct X3270TerminalPane: View {
                 }
             }
             .animation(.easeInOut(duration: 0.18), value: session.isConnected)
+        }
+        .onChange(of: plugins.isEnabled(capability: .hostSearch)) { enabled in
+            if !enabled {
+                showSearch = false
+                searchFocused = false
+            }
+        }
+        .onChange(of: plugins.isEnabled(capability: .screenHistory)) { enabled in
+            if !enabled { historyOffset = 0 }
+        }
+        .onChange(of: plugins.isEnabled(capability: .smartSelection)) { enabled in
+            if !enabled { selection = nil }
         }
     }
 
@@ -335,11 +429,15 @@ private struct X3270TerminalPane: View {
 
 private struct X3270MenuBar: View {
     @EnvironmentObject private var store: SessionStore
+    @EnvironmentObject private var plugins: TerminalPluginStore
     @ObservedObject var session: TerminalSession
     @Binding var showConnectDialog: Bool
     @Binding var showNewSessionDialog: Bool
     @Binding var showEditSessionDialog: Bool
     @Binding var showKeypad: Bool
+    @Binding var showPlugins: Bool
+    @Binding var splitViewEnabled: Bool
+    @Binding var secondarySessionProfileID: String
     @Binding var scaleMode: ScaleMode
     @Binding var manualScale: Double
     @Binding var terminalTheme: TerminalTheme
@@ -440,6 +538,34 @@ private struct X3270MenuBar: View {
                 Button("Idle Command...") {}
             }
 
+            menu("Plugins") {
+                ForEach(plugins.plugins) { plugin in
+                    Toggle(plugin.name, isOn: plugins.binding(for: plugin))
+                }
+                if plugins.isEnabled(capability: .developerSplit) {
+                    Divider()
+                    Toggle("Split View", isOn: $splitViewEnabled)
+                        .disabled(store.sessions.count < 2)
+                    Menu("Rechter sessie") {
+                        ForEach(store.sessions.filter { $0.id != store.selectedSessionID }) { candidate in
+                            Button {
+                                secondarySessionProfileID = candidate.profile.id
+                                splitViewEnabled = true
+                            } label: {
+                                if candidate.profile.id == secondarySessionProfileID {
+                                    Label(candidate.displayName, systemImage: "checkmark")
+                                } else {
+                                    Text(candidate.displayName)
+                                }
+                            }
+                        }
+                    }
+                    .disabled(store.sessions.count < 2)
+                }
+                Divider()
+                Button("Manage Plugins…") { showPlugins = true }
+            }
+
             Button {
                 if session.isConnected {
                     Task { await session.reconnect() }
@@ -487,6 +613,23 @@ private struct X3270MenuBar: View {
             .foregroundStyle(showKeypad ? X3270Colors.selectedText : X3270Colors.primaryText)
             .background(showKeypad ? X3270Colors.selectedTab : X3270Colors.controlBackground)
             .clipShape(RoundedRectangle(cornerRadius: 7))
+
+            if plugins.isEnabled(capability: .developerSplit) {
+                Button {
+                    splitViewEnabled.toggle()
+                } label: {
+                    Label(splitViewEnabled ? "Single" : "Split", systemImage: "rectangle.split.2x1")
+                        .font(.system(size: 12, weight: .medium))
+                        .padding(.horizontal, 10)
+                        .frame(height: 28)
+                }
+                .buttonStyle(.plain)
+                .disabled(store.sessions.count < 2)
+                .foregroundStyle(splitViewEnabled ? X3270Colors.selectedText : X3270Colors.primaryText)
+                .background(splitViewEnabled ? X3270Colors.selectedTab : X3270Colors.controlBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 7))
+                .help(store.sessions.count < 2 ? "Open eerst een tweede sessie" : "Toon twee sessies naast elkaar")
+            }
 
             Spacer(minLength: 0)
 
@@ -778,76 +921,179 @@ private struct X3270SessionStrip: View {
 
 private struct X3270StatusBar: View {
     @ObservedObject var session: TerminalSession
+    @State private var displayedStatus: String?
+    @State private var statusHideTask: Task<Void, Never>?
 
     var body: some View {
-        HStack(spacing: 10) {
-            HStack(spacing: 7) {
-                Circle()
-                    .fill(session.isConnected ? X3270Colors.success : X3270Colors.mutedText)
-                    .frame(width: 7, height: 7)
-                Text(session.isConnected ? "Connected" : "Offline")
-                    .font(.system(size: 12, weight: .semibold))
-            }
-
-            Text(session.displayName)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(X3270Colors.primaryText)
-                .lineLimit(1)
-
-            if let connection = connectionDisplay(for: session) {
-                Text(connection)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(X3270Colors.mutedText)
+        HStack(spacing: 8) {
+            if let displayedStatus {
+                Text(displayedStatus)
                     .lineLimit(1)
-                    .truncationMode(.middle)
+                    .foregroundStyle(statusColor(for: displayedStatus))
+                    .transition(.opacity)
             }
 
             Spacer()
 
-            Text(session.statusText)
-                .lineLimit(1)
-                .foregroundStyle(statusColor)
-
             if session.isKeyboardLocked {
-                statusBadge("LOCK: \(session.keyboardLock)")
-            } else {
-                statusBadge(session.isInsertMode ? "INSERT" : "READY")
+                statusBadge("LOCK", emphasized: true)
+                    .help(session.keyboardLock)
+            } else if session.isInsertMode {
+                statusBadge("INS", emphasized: true)
             }
 
-            statusBadge("Model \(session.terminalModel.rawValue)")
-            statusBadge("\(session.displayRows) zichtbaar")
-            statusBadge("\(session.rows)x\(session.columns)")
-            if session.profile.useTLS {
-                statusBadge("TLS")
-            }
+            Text("Regel \(max(0, session.cursor.row) + 1) · Kolom \(max(0, session.cursor.column) + 1)")
+                .monospacedDigit()
+                .foregroundStyle(X3270Colors.secondaryText)
+
+            statusBadge("\(modelLabel) · \(session.columns)×\(session.rows)")
         }
-        .font(.system(size: 12))
+        .font(.system(size: 11))
         .foregroundStyle(X3270Colors.primaryText)
-        .padding(.horizontal, 12)
-        .frame(height: 34)
+        .padding(.horizontal, 10)
+        .frame(height: 27)
         .background(X3270Colors.panelBackground)
         .overlay(Rectangle().frame(height: 1).foregroundStyle(X3270Colors.border), alignment: .top)
+        .animation(.easeInOut(duration: 0.16), value: displayedStatus)
+        .onAppear { updateDisplayedStatus(session.statusText) }
+        .onChange(of: session.statusText) { updateDisplayedStatus($0) }
+        .onDisappear { statusHideTask?.cancel() }
     }
 
-    private var statusColor: Color {
-        let text = session.statusText.lowercased()
+    private var modelLabel: String {
+        session.terminalModel == .oversize62 ? "OVR" : "M\(session.terminalModel.rawValue)"
+    }
+
+    private func statusColor(for status: String) -> Color {
+        let text = status.lowercased()
         if text.contains("failed") || text.contains("error") || text.contains("mislukt") || text.contains("kon niet") {
             return X3270Colors.warning
         }
-        if session.isConnected {
-            return X3270Colors.secondaryText
-        }
-        return X3270Colors.mutedText
+        return X3270Colors.secondaryText
     }
 
-    private func statusBadge(_ title: String) -> some View {
+    private func updateDisplayedStatus(_ status: String) {
+        statusHideTask?.cancel()
+        let normalized = status.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lowercase = normalized.lowercased()
+        let isNormalState = lowercase.isEmpty
+            || lowercase == "disconnected"
+            || lowercase.hasPrefix("connected to ")
+        guard !isNormalState else {
+            displayedStatus = nil
+            return
+        }
+
+        displayedStatus = normalized
+        let isPersistent = session.isKeyboardLocked
+            || session.isConnecting
+            || lowercase.contains("mislukt")
+            || lowercase.contains("error")
+            || lowercase.contains("kon niet")
+        guard !isPersistent else { return }
+
+        statusHideTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled else { return }
+            displayedStatus = nil
+        }
+    }
+
+    private func statusBadge(_ title: String, emphasized: Bool = false) -> some View {
         Text(title)
             .font(.system(size: 11, weight: .medium, design: .monospaced))
-            .foregroundStyle(X3270Colors.secondaryText)
-            .padding(.horizontal, 8)
-            .frame(height: 22)
-            .background(X3270Colors.controlBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 7))
+            .foregroundStyle(emphasized ? X3270Colors.selectedText : X3270Colors.secondaryText)
+            .padding(.horizontal, 7)
+            .frame(height: 20)
+            .background(emphasized ? X3270Colors.accent : X3270Colors.controlBackground)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+}
+
+private struct X3270PluginsDialog: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var plugins: TerminalPluginStore
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Terminal Plugins")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(X3270Colors.primaryText)
+                    Text("\(plugins.enabledCount) van \(plugins.plugins.count) ingebouwde plugins actief")
+                        .font(.system(size: 12))
+                        .foregroundStyle(X3270Colors.secondaryText)
+                }
+
+                Spacer()
+
+                Button("Alles inschakelen") { plugins.enableAll() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+
+                Button("Gereed") { dismiss() }
+                    .buttonStyle(.borderedProminent)
+                    .tint(X3270Colors.accent)
+                    .controlSize(.small)
+            }
+            .padding(20)
+
+            Divider()
+                .overlay(X3270Colors.border)
+
+            ScrollView {
+                LazyVStack(spacing: 10) {
+                    ForEach(plugins.plugins) { plugin in
+                        HStack(spacing: 14) {
+                            Image(systemName: plugin.icon)
+                                .font(.system(size: 18, weight: .medium))
+                                .foregroundStyle(X3270Colors.accentText)
+                                .frame(width: 38, height: 38)
+                                .background(X3270Colors.badgeBackground)
+                                .clipShape(RoundedRectangle(cornerRadius: 9))
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 8) {
+                                    Text(plugin.name)
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(X3270Colors.primaryText)
+                                    Text("v\(plugin.version)")
+                                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                                        .foregroundStyle(X3270Colors.mutedText)
+                                        .padding(.horizontal, 6)
+                                        .frame(height: 18)
+                                        .background(X3270Colors.controlBackground)
+                                        .clipShape(Capsule())
+                                }
+
+                                Text(plugin.summary)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(X3270Colors.secondaryText)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+
+                            Spacer(minLength: 18)
+
+                            Toggle("", isOn: plugins.binding(for: plugin))
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .tint(X3270Colors.accent)
+                        }
+                        .padding(13)
+                        .background(X3270Colors.controlBackground.opacity(0.72))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(X3270Colors.border.opacity(0.75), lineWidth: 1)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
+                }
+                .padding(16)
+            }
+        }
+        .frame(width: 620, height: 510)
+        .background(X3270Colors.panelBackground)
     }
 }
 

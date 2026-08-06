@@ -3,11 +3,13 @@ import SwiftUI
 @main
 struct Swift3270App: App {
     @StateObject private var sessionStore = SessionStore()
+    @StateObject private var pluginStore = TerminalPluginStore()
 
     var body: some Scene {
         WindowGroup {
             Swift3270LaunchView()
                 .environmentObject(sessionStore)
+                .environmentObject(pluginStore)
         }
         .windowStyle(.hiddenTitleBar)
         .commands {

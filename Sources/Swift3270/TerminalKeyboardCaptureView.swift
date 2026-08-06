@@ -6,6 +6,7 @@ struct TerminalKeyboardCaptureView: NSViewRepresentable {
     let lineHeight: CGFloat
     let rows: Int
     let columns: Int
+    let capabilities: TerminalPluginCapabilities
     var onCopy: () -> Void
     var onPaste: (String) -> Void
     var onFind: () -> Void
@@ -18,6 +19,7 @@ struct TerminalKeyboardCaptureView: NSViewRepresentable {
         view.lineHeight = lineHeight
         view.rows = rows
         view.columns = columns
+        view.capabilities = capabilities
         view.onCopy = onCopy
         view.onPaste = onPaste
         view.onFind = onFind
@@ -34,6 +36,7 @@ struct TerminalKeyboardCaptureView: NSViewRepresentable {
         nsView.lineHeight = lineHeight
         nsView.rows = rows
         nsView.columns = columns
+        nsView.capabilities = capabilities
         nsView.onCopy = onCopy
         nsView.onPaste = onPaste
         nsView.onFind = onFind
@@ -74,6 +77,7 @@ final class KeyCaptureNSView: NSView {
     var lineHeight: CGFloat = 20
     var rows: Int = 24
     var columns: Int = 80
+    var capabilities: TerminalPluginCapabilities = []
     var onCopy: (() -> Void)?
     var onPaste: ((String) -> Void)?
     var onFind: (() -> Void)?
@@ -103,7 +107,7 @@ final class KeyCaptureNSView: NSView {
         window?.makeFirstResponder(self)
         let point = convert(event.locationInWindow, from: nil)
         if let position = terminalPosition(for: point) {
-            if event.clickCount == 2 {
+            if event.clickCount == 2, capabilities.contains(.smartSelection) {
                 ignoreNextMouseUp = true
                 selectionAnchor = nil
                 mouseDownPoint = nil
@@ -118,6 +122,7 @@ final class KeyCaptureNSView: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        guard capabilities.contains(.smartSelection) else { return }
         let point = convert(event.locationInWindow, from: nil)
         guard didDragSelection || hasMovedPastSelectionThreshold(point) else { return }
         guard let position = terminalPosition(for: point) else { return }
@@ -150,6 +155,10 @@ final class KeyCaptureNSView: NSView {
 
     override func scrollWheel(with event: NSEvent) {
         window?.makeFirstResponder(self)
+        guard capabilities.contains(.trackpadNavigation) else {
+            super.scrollWheel(with: event)
+            return
+        }
 
         if event.phase == .began {
             accumulatedScrollX = 0
@@ -171,7 +180,7 @@ final class KeyCaptureNSView: NSView {
         let threshold = event.hasPreciseScrollingDeltas ? trackpadScrollThreshold : 1
 
         if vertical >= threshold, vertical >= horizontal {
-            if event.modifierFlags.contains(.option) {
+            if event.modifierFlags.contains(.option), capabilities.contains(.screenHistory) {
                 onHistoryScroll?(accumulatedScrollY > 0 ? 1 : -1)
             } else {
                 onEvent?(accumulatedScrollY > 0 ? .pageUp : .pageDown)
@@ -194,17 +203,20 @@ final class KeyCaptureNSView: NSView {
 
     override func keyDown(with event: NSEvent) {
         if event.modifierFlags.contains(.command) {
-            if event.charactersIgnoringModifiers?.lowercased() == "c" {
+            if event.charactersIgnoringModifiers?.lowercased() == "c",
+               capabilities.contains(.clipboard) {
                 onCopy?()
                 return
             }
-            if event.charactersIgnoringModifiers?.lowercased() == "v" {
+            if event.charactersIgnoringModifiers?.lowercased() == "v",
+               capabilities.contains(.clipboard) {
                 if let text = NSPasteboard.general.string(forType: .string), !text.isEmpty {
                     onPaste?(text)
                 }
                 return
             }
-            if event.charactersIgnoringModifiers?.lowercased() == "f" {
+            if event.charactersIgnoringModifiers?.lowercased() == "f",
+               capabilities.contains(.hostSearch) {
                 onFind?()
                 return
             }
