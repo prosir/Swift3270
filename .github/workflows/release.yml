@@ -96,10 +96,15 @@ jobs:
             if [[ "$asset" == *.sha256 ]]; then
               content_type="text/plain"
             fi
-            gh api \
-              --hostname uploads.github.com \
-              --method POST \
+            curl \
+              --fail-with-body \
+              --location \
+              --retry 3 \
+              --request POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
               -H "Content-Type: $content_type" \
-              --input "$asset" \
-              "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?name=$asset"
+              --data-binary "@$asset" \
+              "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$release_id/assets?name=$asset"
           done
