@@ -6,6 +6,13 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing release tag to package, for example V0.1.3
+        required: false
+        type: string
+  release:
+    types: [published]
 
 permissions:
   contents: read
@@ -27,8 +34,42 @@ jobs:
         run: swift build -c release
 
       - name: Upload artifact
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && inputs.release_tag == ''
         uses: actions/upload-artifact@v4
         with:
           name: Swift3270-release-binary
           path: .build/release/Swift3270
+
+  release:
+    name: Package GitHub release
+    if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
+    needs: swift
+    runs-on: macos-14
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build app bundle
+        env:
+          SWIFT3270_BUILD: ${{ github.run_number }}
+        run: |
+          SWIFT3270_VERSION="${RELEASE_TAG#[vV]}" ./Scripts/build-app.sh
+
+      - name: Package app and checksum
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent Swift3270.app Swift3270-macOS.zip
+          shasum -a 256 Swift3270-macOS.zip > Swift3270-macOS.zip.sha256
+
+      - name: Attach updater files to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$RELEASE_TAG" \
+            Swift3270-macOS.zip \
+            Swift3270-macOS.zip.sha256 \
+            --clobber
