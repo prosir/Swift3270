@@ -14,7 +14,6 @@ final class TerminalSession: ObservableObject, Identifiable {
     @Published var terminalModel: TerminalModel = .model2
     @Published var activeError: TerminalSessionError?
     @Published var suggestsExpandedScreen = false
-    @Published private(set) var isUnresponsive = false
     @Published private(set) var isCollectingSFDII = false
     @Published var expandedSFDIISnapshot: ExpandedSFDIISnapshot?
 
@@ -46,6 +45,7 @@ final class TerminalSession: ObservableObject, Identifiable {
     private var directTextBuffer = ""
     private var directTextFlushTask: Task<Void, Never>?
     private var lastLoggedLayout = ""
+    private var lastPresentedErrorSignature: String?
     var onProfileChanged: (() -> Void)?
 
     init(profile: SessionProfile) {
@@ -86,8 +86,8 @@ final class TerminalSession: ObservableObject, Identifiable {
 
         do {
             isConnecting = true
-            isUnresponsive = false
             activeError = nil
+            lastPresentedErrorSignature = nil
             statusText = "Connecting to \(spec)..."
             resetScreenBuffer()
             rebuildBackend()
@@ -115,8 +115,8 @@ final class TerminalSession: ObservableObject, Identifiable {
 
         do {
             isConnecting = true
-            isUnresponsive = false
             activeError = nil
+            lastPresentedErrorSignature = nil
             statusText = "Connecting to \(profile.connectionSpec)..."
             resetScreenBuffer()
             rebuildBackend()
@@ -265,7 +265,6 @@ final class TerminalSession: ObservableObject, Identifiable {
         await backend.stop()
         isConnected = false
         isConnecting = false
-        isUnresponsive = false
         statusText = "Disconnected"
         resetScreenBuffer()
         rebuildBackend()
@@ -518,12 +517,6 @@ final class TerminalSession: ObservableObject, Identifiable {
                         guard column < columns else { break }
                         cells[rowChange.row][column].character = character
                     }
-                } else if let count = change.count {
-                    for offset in 0..<count {
-                        let column = change.column + offset
-                        guard column < columns else { break }
-                        cells[rowChange.row][column].character = " "
-                    }
                 }
             }
         }
@@ -589,7 +582,6 @@ final class TerminalSession: ObservableObject, Identifiable {
     private func setScreenCells(_ cells: [[TerminalCell]]) {
         screenCells = cells
         screenLines = cells.map { row in String(row.map(\.character)) }
-        logCurrentLayoutIfChanged()
     }
 
     private func logCurrentLayoutIfChanged() {
@@ -655,6 +647,9 @@ final class TerminalSession: ObservableObject, Identifiable {
     private func reportError(title: String, error: Error, recovery: String) {
         let message = error.localizedDescription
         statusText = "\(title): \(message)"
+        let signature = "\(title)|\(message)"
+        guard signature != lastPresentedErrorSignature else { return }
+        lastPresentedErrorSignature = signature
         activeError = TerminalSessionError(title: title, message: message, recovery: recovery)
     }
 
@@ -668,20 +663,9 @@ final class TerminalSession: ObservableObject, Identifiable {
         }
 
         if backendStopped {
-            isUnresponsive = true
-            isConnected = false
-            statusText = "Sessie reageert niet"
-            activeError = TerminalSessionError(
-                title: "Sessie reageert niet",
-                message: "Swift3270 kreeg geen antwoord op ‘\(action)’: \(error.localizedDescription)",
-                recovery: "De sessie lijkt vastgelopen. Kies Reconnect om de verbinding veilig opnieuw op te bouwen."
-            )
+            statusText = "Geen antwoord op \(action) — verbinding blijft actief"
         } else {
-            reportError(
-                title: "Opdracht mislukt",
-                error: error,
-                recovery: "De verbinding is nog actief. Probeer Reset als het scherm niet reageert."
-            )
+            statusText = "\(action) tijdelijk niet verwerkt — probeer opnieuw"
         }
     }
 }

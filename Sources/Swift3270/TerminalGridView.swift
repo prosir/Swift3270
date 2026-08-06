@@ -30,15 +30,19 @@ struct TerminalGridView: View {
                         height: lineHeight
                     )
 
-                    let background = background(for: cell, isCursor: isCursor, isSelected: isSelected)
-                    context.fill(Path(rect), with: .color(background))
+                    if shouldDrawBackground(for: cell, isCursor: isCursor, isSelected: isSelected) {
+                        let background = background(for: cell, isCursor: isCursor, isSelected: isSelected)
+                        context.fill(Path(rect), with: .color(background))
+                    }
 
-                    var text = context.resolve(
-                        Text(String(cell.character))
-                            .font(.system(size: fontSize, weight: .regular, design: .monospaced))
-                    )
-                    text.shading = .color(textColor(for: cell, isCursor: isCursor, isSelected: isSelected))
-                    context.draw(text, at: CGPoint(x: rect.midX, y: rect.midY), anchor: .center)
+                    if cell.character != " " {
+                        var text = context.resolve(
+                            Text(String(cell.character))
+                                .font(.system(size: fontSize, weight: .regular, design: .monospaced))
+                        )
+                        text.shading = .color(textColor(for: cell, isCursor: isCursor, isSelected: isSelected))
+                        context.draw(text, at: CGPoint(x: rect.midX, y: rect.midY), anchor: .center)
+                    }
 
                     if cell.hasGraphicRendition("underscore") || cell.hasGraphicRendition("underline") {
                         var underline = Path()
@@ -100,6 +104,13 @@ struct TerminalGridView: View {
         }
 
         return theme.palette.background(named: cell.background) ?? Color.clear
+    }
+
+    private func shouldDrawBackground(for cell: TerminalCell, isCursor: Bool, isSelected: Bool) -> Bool {
+        isCursor
+            || isSelected
+            || cell.hasGraphicRendition("reverse")
+            || TerminalColorName.normalize(cell.background ?? "neutralBlack") != "neutralblack"
     }
 }
 
