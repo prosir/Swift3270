@@ -69,8 +69,29 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "$RELEASE_TAG" \
-            Swift3270-macOS.zip \
-            Swift3270-macOS.zip.sha256 \
-            --repo "$GITHUB_REPOSITORY" \
-            --clobber
+          release_id="$(gh api "repos/$GITHUB_REPOSITORY/releases" \
+            --paginate \
+            --jq ".[] | select(.tag_name == \"$RELEASE_TAG\") | .id" | head -n 1)"
+          if [[ -z "$release_id" ]]; then
+            echo "Release $RELEASE_TAG not found" >&2
+            exit 1
+          fi
+
+          for asset in Swift3270-macOS.zip Swift3270-macOS.zip.sha256; do
+            existing_id="$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets" \
+              --jq ".[] | select(.name == \"$asset\") | .id" | head -n 1)"
+            if [[ -n "$existing_id" ]]; then
+              gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$existing_id"
+            fi
+
+            content_type="application/zip"
+            if [[ "$asset" == *.sha256 ]]; then
+              content_type="text/plain"
+            fi
+            gh api \
+              --hostname uploads.github.com \
+              --method POST \
+              -H "Content-Type: $content_type" \
+              --input "$asset" \
+              "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?name=$asset"
+          done
