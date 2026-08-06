@@ -44,7 +44,6 @@ final class TerminalSession: ObservableObject, Identifiable {
     private var refreshTask: Task<Void, Never>?
     private var directTextBuffer = ""
     private var directTextFlushTask: Task<Void, Never>?
-    private var lastLoggedLayout = ""
     private var lastPresentedErrorSignature: String?
     var onProfileChanged: (() -> Void)?
 
@@ -582,33 +581,6 @@ final class TerminalSession: ObservableObject, Identifiable {
     private func setScreenCells(_ cells: [[TerminalCell]]) {
         screenCells = cells
         screenLines = cells.map { row in String(row.map(\.character)) }
-    }
-
-    private func logCurrentLayoutIfChanged() {
-        let nonEmptyRows = screenLines.indices.filter {
-            !screenLines[$0].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
-        let usedRange = nonEmptyRows.first.map { first in
-            "\(first + 1)-\((nonEmptyRows.last ?? first) + 1)"
-        } ?? "geen"
-        let layout = "model=\(terminalModel.rawValue) host=\(columns)x\(rows) usedRows=\(usedRange) visibleRows=\(displayRows) sfdiTwoPane=\(isSFDIITwoPaneScreen)"
-        guard layout != lastLoggedLayout else { return }
-        lastLoggedLayout = layout
-
-        let timestamp = ISO8601DateFormatter().string(from: Date())
-        let visibleLines = screenLines.enumerated().compactMap { index, line -> String? in
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            return trimmed.isEmpty ? nil : String(format: "%02d: %@", index + 1, trimmed)
-        }.joined(separator: "\n")
-        let entry = "[\(timestamp)] \(layout)\n\(visibleLines)\n---\n"
-        let url = URL(fileURLWithPath: "/tmp/Swift3270-screen.log")
-        if let handle = try? FileHandle(forWritingTo: url) {
-            defer { try? handle.close() }
-            try? handle.seekToEnd()
-            try? handle.write(contentsOf: Data(entry.utf8))
-        } else {
-            try? Data(entry.utf8).write(to: url, options: .atomic)
-        }
     }
 
     private func applyTextSnapshotPreservingAttributes(_ lines: [String]) {
