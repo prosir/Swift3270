@@ -11,9 +11,11 @@ struct ContentView: View {
     @State private var showEditSessionDialog = false
     @State private var showKeypad = false
     @State private var showPlugins = false
+    @State private var showPersonalize = false
     @State private var terminalTheme: TerminalTheme = .ibm3279
     @AppStorage("Swift3270.developerSplit.enabled") private var splitViewEnabled = false
     @AppStorage("Swift3270.developerSplit.secondaryProfile") private var secondarySessionProfileID = ""
+    @AppStorage(AppAccentTheme.storageKey) private var accentColorValue = AppAccentTheme.blue.rawValue
 
     private var secondarySession: TerminalSession? {
         let candidates = store.sessions.filter { $0.id != store.selectedSessionID }
@@ -35,6 +37,7 @@ struct ContentView: View {
                 showEditSessionDialog: $showEditSessionDialog,
                 showKeypad: $showKeypad,
                 showPlugins: $showPlugins,
+                showPersonalize: $showPersonalize,
                 splitViewEnabled: $splitViewEnabled,
                 secondarySessionProfileID: $secondarySessionProfileID,
                 scaleMode: $scaleMode,
@@ -65,6 +68,7 @@ struct ContentView: View {
             X3270StatusBar(session: store.selectedSession)
         }
         .background(X3270Colors.appBackground)
+        .tint(AppAccentTheme.color(forStoredValue: accentColorValue))
         .sheet(isPresented: $showConnectDialog) {
             X3270ConnectDialog(session: store.selectedSession)
         }
@@ -77,6 +81,9 @@ struct ContentView: View {
         .sheet(isPresented: $showPlugins) {
             X3270PluginsDialog()
                 .environmentObject(plugins)
+        }
+        .sheet(isPresented: $showPersonalize) {
+            X3270PersonalizeDialog()
         }
         .alert(item: activeErrorBinding) { error in
             Alert(
@@ -436,6 +443,7 @@ private struct X3270MenuBar: View {
     @Binding var showEditSessionDialog: Bool
     @Binding var showKeypad: Bool
     @Binding var showPlugins: Bool
+    @Binding var showPersonalize: Bool
     @Binding var splitViewEnabled: Bool
     @Binding var secondarySessionProfileID: String
     @Binding var scaleMode: ScaleMode
@@ -543,6 +551,10 @@ private struct X3270MenuBar: View {
                 ForEach(plugins.plugins) { plugin in
                     Toggle(plugin.name, isOn: plugins.binding(for: plugin))
                 }
+                if plugins.isEnabled(capability: .personalization) {
+                    Divider()
+                    Button("Personalize…") { showPersonalize = true }
+                }
                 if plugins.isEnabled(capability: .developerSplit) {
                     Divider()
                     Toggle("Split View", isOn: $splitViewEnabled)
@@ -582,7 +594,7 @@ private struct X3270MenuBar: View {
                     .fixedSize(horizontal: true, vertical: false)
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.white)
+            .foregroundStyle(X3270Colors.selectedText)
             .background(X3270Colors.accent)
             .clipShape(RoundedRectangle(cornerRadius: 8))
 
@@ -729,7 +741,7 @@ private struct X3270StartScreen: View {
                     )
                 Image(systemName: "terminal.fill")
                     .font(.system(size: 32, weight: .semibold))
-                    .foregroundStyle(X3270Colors.accentText)
+                    .foregroundStyle(X3270Colors.selectedText)
             }
 
             VStack(spacing: 6) {
@@ -767,7 +779,7 @@ private struct X3270StartScreen: View {
                     .frame(width: 132, height: 36)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.white)
+                .foregroundStyle(X3270Colors.selectedText)
                 .background(isConnecting ? X3270Colors.mutedText : X3270Colors.accent)
                 .clipShape(RoundedRectangle(cornerRadius: 9))
 
@@ -874,10 +886,10 @@ private struct X3270SessionStrip: View {
                     if selected {
                         Text(session.profile.codePage)
                             .font(.system(size: 10, weight: .medium, design: .monospaced))
-                            .foregroundStyle(X3270Colors.secondaryText)
+                            .foregroundStyle(X3270Colors.selectedText.opacity(0.84))
                             .padding(.horizontal, 6)
                             .frame(height: 18)
-                            .background(X3270Colors.badgeBackground)
+                            .background(X3270Colors.selectedText.opacity(0.14))
                             .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
                 }
@@ -1062,7 +1074,7 @@ private struct X3270PluginsDialog: View {
                         HStack(spacing: 14) {
                             Image(systemName: plugin.icon)
                                 .font(.system(size: 18, weight: .medium))
-                                .foregroundStyle(X3270Colors.accentText)
+                                .foregroundStyle(X3270Colors.selectedText)
                                 .frame(width: 38, height: 38)
                                 .background(X3270Colors.badgeBackground)
                                 .clipShape(RoundedRectangle(cornerRadius: 9))
@@ -1107,6 +1119,107 @@ private struct X3270PluginsDialog: View {
             }
         }
         .frame(width: 620, height: 510)
+        .background(X3270Colors.panelBackground)
+    }
+}
+
+private struct X3270PersonalizeDialog: View {
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage(AppAccentTheme.storageKey) private var accentColorValue = AppAccentTheme.blue.rawValue
+
+    private var selectedColor: Binding<Color> {
+        Binding(
+            get: { AppAccentTheme.color(forStoredValue: accentColorValue) },
+            set: { accentColorValue = AppAccentTheme.hexValue(for: $0) }
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Personalize")
+                        .font(.system(size: 20, weight: .semibold))
+                    Text("Kies de kleur van geselecteerde tabs, badges en actieve knoppen.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(X3270Colors.secondaryText)
+                }
+                Spacer()
+                Button("Gereed") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                Text("KLEURENPALET")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(X3270Colors.mutedText)
+
+                HStack(spacing: 10) {
+                    ForEach(AppAccentTheme.allCases) { theme in
+                        Button {
+                            accentColorValue = theme.rawValue
+                        } label: {
+                            Circle()
+                                .fill(theme.accent)
+                                .frame(width: 28, height: 28)
+                                .overlay {
+                                    if accentColorValue == theme.rawValue {
+                                        Image(systemName: "checkmark")
+                                            .font(.system(size: 11, weight: .bold))
+                                            .foregroundStyle(theme.accentText)
+                                    }
+                                }
+                                .overlay(Circle().stroke(Color.white.opacity(0.24), lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
+                        .help(theme.label)
+                    }
+
+                    Divider().frame(height: 28)
+
+                    ColorPicker("Eigen kleur", selection: selectedColor, supportsOpacity: false)
+                        .font(.system(size: 12, weight: .medium))
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("VOORBEELD")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(X3270Colors.mutedText)
+
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(X3270Colors.success)
+                        .frame(width: 8, height: 8)
+                    Text("CICS")
+                        .font(.system(size: 13, weight: .semibold))
+                    Text("cp037")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .padding(.horizontal, 7)
+                        .frame(height: 20)
+                        .background(X3270Colors.selectedText.opacity(0.14))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                }
+                .foregroundStyle(X3270Colors.selectedText)
+                .padding(.horizontal, 14)
+                .frame(height: 38)
+                .background(X3270Colors.selectedTab)
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(X3270Colors.accent, lineWidth: 1))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+
+            HStack {
+                Button("Herstel blauw") { accentColorValue = AppAccentTheme.blue.rawValue }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(X3270Colors.secondaryText)
+                Spacer()
+                Text("Terminaltekst en 3270-veldkleuren veranderen niet.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(X3270Colors.mutedText)
+            }
+        }
+        .padding(22)
+        .frame(width: 500)
         .background(X3270Colors.panelBackground)
     }
 }
@@ -1805,17 +1918,17 @@ private enum X3270Colors {
     static let controlBackground = Color(red: 0.110, green: 0.130, blue: 0.170)
     static let terminalFrame = Color(red: 0.010, green: 0.014, blue: 0.022)
     static let startPanel = Color(red: 0.070, green: 0.084, blue: 0.116)
-    static let selectedTab = Color(red: 0.120, green: 0.220, blue: 0.390)
-    static let badgeBackground = Color(red: 0.100, green: 0.175, blue: 0.280)
+    static var selectedTab: Color { AppAccentTheme.currentAccent }
+    static var badgeBackground: Color { AppAccentTheme.currentAccent }
     static let border = Color(red: 0.320, green: 0.370, blue: 0.470)
-    static let accent = Color(red: 0.200, green: 0.560, blue: 1.000)
-    static let accentText = Color(red: 0.740, green: 0.900, blue: 1.000)
+    static var accent: Color { AppAccentTheme.currentAccent }
+    static let accentText = primaryText
     static let success = Color(red: 0.220, green: 0.820, blue: 0.470)
     static let warning = Color(red: 1.000, green: 0.720, blue: 0.220)
     static let primaryText = Color(red: 0.940, green: 0.965, blue: 1.000)
     static let secondaryText = Color(red: 0.750, green: 0.805, blue: 0.890)
     static let mutedText = Color(red: 0.500, green: 0.570, blue: 0.680)
-    static let selectedText = Color.white
+    static var selectedText: Color { AppAccentTheme.currentContrastingText }
 
     static let windowGrey = appBackground
     static let menuGrey = controlBackground

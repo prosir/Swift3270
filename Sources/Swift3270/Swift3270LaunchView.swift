@@ -257,7 +257,7 @@ private struct WindowSizeController: NSViewRepresentable {
 private enum LaunchColors {
     static let background = Color(red: 0.043, green: 0.051, blue: 0.068)
     static let track = Color.white.opacity(0.12)
-    static let accent = Color(red: 0.200, green: 0.560, blue: 1.000)
+    static var accent: Color { AppAccentTheme.currentAccent }
     static let primaryText = Color(red: 0.950, green: 0.965, blue: 0.990)
     static let secondaryText = Color(red: 0.690, green: 0.730, blue: 0.800)
     static let mutedText = Color(red: 0.470, green: 0.510, blue: 0.580)
