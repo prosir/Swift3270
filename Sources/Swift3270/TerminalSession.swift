@@ -11,6 +11,9 @@ final class TerminalSession: ObservableObject, Identifiable {
     @Published private(set) var statusText = "Disconnected"
     @Published private(set) var isConnected = false
     @Published private(set) var isConnecting = false
+    @Published private(set) var keyboardLock = "not-connected"
+    @Published private(set) var isInsertMode = false
+    @Published private(set) var screenHistory: [TerminalSnapshot] = []
     @Published var terminalModel: TerminalModel = .model2
     @Published var activeError: TerminalSessionError?
     @Published var suggestsExpandedScreen = false
@@ -19,6 +22,9 @@ final class TerminalSession: ObservableObject, Identifiable {
 
     var rows: Int { terminalModel.rows }
     var columns: Int { terminalModel.columns }
+    var isKeyboardLocked: Bool {
+        !["unlocked", "not-connected"].contains(keyboardLock.lowercased())
+    }
     var displayRows: Int {
         guard terminalModel == .model4 else {
             return rows
@@ -44,6 +50,7 @@ final class TerminalSession: ObservableObject, Identifiable {
     private var refreshTask: Task<Void, Never>?
     private var directTextBuffer = ""
     private var directTextFlushTask: Task<Void, Never>?
+    private var historyCaptureTask: Task<Void, Never>?
     private var lastPresentedErrorSignature: String?
     var onProfileChanged: (() -> Void)?
 
@@ -58,6 +65,9 @@ final class TerminalSession: ObservableObject, Identifiable {
         backend = Self.makeBackend(codePage: profile.codePage, model: savedModel) { [weak self] event in
             guard let session = self else { return }
             Task { @MainActor in session.applyScreenEvent(event) }
+        } statusEventHandler: { [weak self] event in
+            guard let session = self else { return }
+            Task { @MainActor in session.applyStatusEvent(event) }
         }
     }
 
@@ -264,6 +274,7 @@ final class TerminalSession: ObservableObject, Identifiable {
         await backend.stop()
         isConnected = false
         isConnecting = false
+        keyboardLock = "not-connected"
         statusText = "Disconnected"
         resetScreenBuffer()
         rebuildBackend()
@@ -314,6 +325,9 @@ final class TerminalSession: ObservableObject, Identifiable {
             Task { @MainActor in
                 session.applyScreenEvent(event)
             }
+        } statusEventHandler: { [weak self] event in
+            guard let session = self else { return }
+            Task { @MainActor in session.applyStatusEvent(event) }
         }
     }
 
@@ -361,6 +375,69 @@ final class TerminalSession: ObservableObject, Identifiable {
         let trimmed = text.trimmingCharacters(in: .newlines)
         guard !trimmed.isEmpty else { return }
         await send(label: "Text") { try await backend.sendText(trimmed) }
+    }
+
+    func findOnHost(_ query: String) async {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        await submitHostCommand("F \(trimmed)", label: "Zoeken")
+    }
+
+    func findNextOnHost(_ query: String) async {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        await repeatFindOnHost()
+    }
+
+    func findPreviousOnHost(_ query: String) async {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        await submitHostCommand("F \(trimmed) PREV", label: "Vorige zoeken")
+    }
+
+    func repeatFindOnHost() async {
+        guard isConnected else { return }
+        await flushDirectText()
+        do {
+            try await backend.pf(5)
+            statusText = "Verder zoeken (PF5)"
+        } catch {
+            statusText = "Verder zoeken niet verwerkt: \(error.localizedDescription)"
+        }
+    }
+
+    private func submitHostCommand(_ command: String, label: String) async {
+        guard isConnected else { return }
+        await flushDirectText()
+        guard let position = hostCommandPosition() else {
+            statusText = "Geen COMMAND/OPTION-regel gevonden op dit scherm"
+            return
+        }
+        do {
+            try await backend.moveCursor(row: position.row, column: position.column)
+            try await backend.eraseEOF()
+            try await backend.sendText(command)
+            try await backend.enter()
+            statusText = "\(label): \(command)"
+        } catch {
+            statusText = "\(label) niet verwerkt: \(error.localizedDescription)"
+        }
+    }
+
+    private func hostCommandPosition() -> TerminalCursor? {
+        let markers = ["COMMAND ===>", "OPTION ===>", "CMD ===>"]
+        for (row, line) in screenLines.enumerated() {
+            let upper = line.uppercased()
+            for marker in markers {
+                if let range = upper.range(of: marker) {
+                    // ISPF/SFDII leaves a protected separator immediately
+                    // after ===>; the writable command field starts one cell later.
+                    let column = upper.distance(from: upper.startIndex, to: range.upperBound) + 1
+                    return TerminalCursor(row: row, column: min(columns - 1, column))
+                }
+            }
+        }
+        return nil
     }
 
     func handleKeyEvent(_ event: TerminalKeyEvent) {
@@ -419,7 +496,7 @@ final class TerminalSession: ObservableObject, Identifiable {
             case .moveCursor(let row, let column):
                 await flushDirectText()
                 await send(label: "MoveCursor") { try await backend.moveCursor(row: row, column: column) }
-            case .selectionStarted, .selectionChanged, .selectionEnded:
+            case .selectionStarted, .selectionChanged, .selectionEnded, .selectWord:
                 break
             case .reset:
                 await flushDirectText()
@@ -470,14 +547,21 @@ final class TerminalSession: ObservableObject, Identifiable {
     private static func makeBackend(
         codePage: String,
         model: TerminalModel = .model2,
-        screenEventHandler: @escaping @Sendable (B3270ScreenEvent) -> Void
+        screenEventHandler: @escaping @Sendable (B3270ScreenEvent) -> Void,
+        statusEventHandler: @escaping @Sendable (B3270StatusEvent) -> Void = { _ in }
     ) -> B3270Backend {
         B3270Backend(
             codePage: codePage,
             model: model.rawValue,
             oversize: nil,
-            screenEventHandler: screenEventHandler
+            screenEventHandler: screenEventHandler,
+            statusEventHandler: statusEventHandler
         )
+    }
+
+    private func applyStatusEvent(_ event: B3270StatusEvent) {
+        if let lock = event.lock { keyboardLock = lock }
+        if let insertMode = event.insertMode { isInsertMode = insertMode }
     }
 
     private func applyScreenEvent(_ event: B3270ScreenEvent) {
@@ -581,6 +665,25 @@ final class TerminalSession: ObservableObject, Identifiable {
     private func setScreenCells(_ cells: [[TerminalCell]]) {
         screenCells = cells
         screenLines = cells.map { row in String(row.map(\.character)) }
+        scheduleHistoryCapture()
+    }
+
+    private func scheduleHistoryCapture() {
+        historyCaptureTask?.cancel()
+        historyCaptureTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(280))
+            guard !Task.isCancelled else { return }
+            self?.captureStableScreen()
+        }
+    }
+
+    private func captureStableScreen() {
+        guard screenCells.contains(where: { row in row.contains(where: { $0.character != " " }) }) else { return }
+        guard screenHistory.last?.cells != screenCells else { return }
+        screenHistory.append(TerminalSnapshot(cells: screenCells, capturedAt: Date()))
+        if screenHistory.count > 50 {
+            screenHistory.removeFirst(screenHistory.count - 50)
+        }
     }
 
     private func applyTextSnapshotPreservingAttributes(_ lines: [String]) {
@@ -642,7 +745,7 @@ final class TerminalSession: ObservableObject, Identifiable {
     }
 }
 
-struct TerminalCursor: Equatable {
+struct TerminalCursor: Equatable, Hashable {
     let row: Int
     let column: Int
 }
@@ -679,6 +782,12 @@ struct TerminalSessionError: Identifiable {
     let title: String
     let message: String
     let recovery: String
+}
+
+struct TerminalSnapshot: Identifiable {
+    let id = UUID()
+    let cells: [[TerminalCell]]
+    let capturedAt: Date
 }
 
 struct ExpandedSFDIISnapshot: Identifiable {

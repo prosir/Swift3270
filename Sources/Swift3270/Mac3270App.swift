@@ -6,9 +6,8 @@ struct Swift3270App: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            Swift3270LaunchView()
                 .environmentObject(sessionStore)
-                .frame(minWidth: 1280, minHeight: 850)
         }
         .windowStyle(.hiddenTitleBar)
         .commands {

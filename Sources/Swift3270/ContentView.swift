@@ -3,7 +3,6 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var store: SessionStore
-    @StateObject private var updateChecker = UpdateChecker()
     @State private var scaleMode: ScaleMode = .fit
     @State private var manualScale = 1.0
     @State private var showConnectDialog = false
@@ -59,9 +58,6 @@ struct ContentView: View {
         .sheet(isPresented: $showEditSessionDialog) {
             X3270EditSessionDialog(session: store.selectedSession)
         }
-        .sheet(item: $updateChecker.availableUpdate) { update in
-            X3270UpdateDialog(update: update)
-        }
         .alert(item: activeErrorBinding) { error in
             Alert(
                 title: Text(error.title),
@@ -71,9 +67,6 @@ struct ContentView: View {
                 },
                 secondaryButton: .cancel(Text("Sluiten"))
             )
-        }
-        .task {
-            await updateChecker.checkForUpdates()
         }
         .preferredColorScheme(.dark)
     }
@@ -96,36 +89,51 @@ private struct X3270TerminalPane: View {
     @Binding var showNewSessionDialog: Bool
     @Binding var showEditSessionDialog: Bool
     @State private var selection: TerminalSelection?
+    @State private var historyOffset = 0
+    @State private var showSearch = false
+    @State private var searchText = ""
+    @FocusState private var searchFocused: Bool
+
+    private var activeCells: [[TerminalCell]] {
+        guard historyOffset > 0, historyOffset <= session.screenHistory.count else {
+            return session.screenCells
+        }
+        return session.screenHistory[session.screenHistory.count - historyOffset].cells
+    }
 
     var body: some View {
         GeometryReader { geometry in
+            let fullPageCells = activeCells
+            let displayedRows = historyOffset == 0 ? session.displayRows : visibleRows(in: fullPageCells)
+            let displayedCells = Array(fullPageCells.prefix(displayedRows))
             let fittedSize = TerminalMetrics.fontSize(
                 container: geometry.size,
                 columns: session.columns,
-                rows: session.displayRows,
+                rows: displayedRows,
                 mode: scaleMode,
                 manualScale: manualScale
             )
             let fittedLineHeight = TerminalMetrics.lineHeight(
                 containerHeight: geometry.size.height,
-                rows: session.displayRows,
+                rows: displayedRows,
                 fontSize: fittedSize,
                 mode: scaleMode
             )
 
             TerminalGridView(
-                cells: Array(session.screenCells.prefix(session.displayRows)),
+                cells: displayedCells,
                 fontSize: fittedSize,
                 lineHeight: fittedLineHeight,
-                cursor: session.cursor,
+                cursor: historyOffset == 0 ? session.cursor : TerminalCursor(row: -1, column: -1),
                 theme: terminalTheme,
-                selection: selection
+                selection: selection,
+                searchMatches: []
             )
             .overlay(
                 TerminalKeyboardCaptureView(
                     fontSize: fittedSize,
                     lineHeight: fittedLineHeight,
-                    rows: session.displayRows,
+                    rows: displayedRows,
                     columns: session.columns,
                     onCopy: {
                     copySelectionToClipboard()
@@ -133,11 +141,88 @@ private struct X3270TerminalPane: View {
                     onPaste: { text in
                         pasteText(text)
                     },
+                    onFind: {
+                        showSearch = true
+                        DispatchQueue.main.async { searchFocused = true }
+                    },
+                    onHistoryScroll: { direction in
+                        let next = historyOffset + direction
+                        historyOffset = min(session.screenHistory.count, max(0, next))
+                        selection = nil
+                    },
                     onEvent: { event in
                         handleTerminalEvent(event)
                     }
                 )
             )
+            .overlay(alignment: .topTrailing) {
+                if showSearch {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                        TextField("Zoeken", text: $searchText)
+                            .textFieldStyle(.plain)
+                            .frame(width: 180)
+                            .focused($searchFocused)
+                            .onSubmit {
+                                Task { await session.findOnHost(searchText) }
+                            }
+                        Button {
+                            Task { await session.findOnHost(searchText) }
+                        } label: {
+                            Text("Zoek")
+                                .font(.system(size: 11, weight: .semibold))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        Button {
+                            Task { await session.findPreviousOnHost(searchText) }
+                        } label: {
+                            Label("Vorige", systemImage: "chevron.up")
+                                .font(.system(size: 11, weight: .semibold))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        Button {
+                            Task { await session.findNextOnHost(searchText) }
+                        } label: {
+                            Label("Volgende", systemImage: "chevron.down")
+                                .font(.system(size: 11, weight: .semibold))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        Button {
+                            searchText = ""
+                            showSearch = false
+                            searchFocused = false
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 10)
+                    .frame(height: 32)
+                    .background(X3270Colors.panelBackground.opacity(0.96))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(X3270Colors.border))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .padding(10)
+                }
+            }
+            .overlay(alignment: .topLeading) {
+                if historyOffset > 0 {
+                    HStack(spacing: 8) {
+                        Text("Geschiedenis −\(historyOffset)")
+                        Button("Live") { historyOffset = 0 }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(X3270Colors.accentText)
+                    }
+                    .font(.system(size: 11, weight: .semibold))
+                    .padding(.horizontal, 10)
+                    .frame(height: 28)
+                    .background(X3270Colors.panelBackground.opacity(0.96))
+                    .clipShape(RoundedRectangle(cornerRadius: 7))
+                    .padding(10)
+                }
+            }
             .padding(10)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(X3270Colors.terminalFrame)
@@ -166,15 +251,40 @@ private struct X3270TerminalPane: View {
             selection = TerminalSelection(anchor: current.anchor, focus: TerminalCursor(row: row, column: column))
         case .selectionEnded:
             break
+        case .selectWord(let row, let column):
+            selectWord(row: row, column: column)
         case .moveCursor:
             selection = nil
+            historyOffset = 0
             session.handleKeyEvent(event)
         case .text:
             selection = nil
+            historyOffset = 0
             session.handleKeyEvent(event)
         default:
             session.handleKeyEvent(event)
         }
+    }
+
+    private func selectWord(row: Int, column: Int) {
+        guard row >= 0, row < activeCells.count else { return }
+        let cells = activeCells[row]
+        guard column >= 0, column < cells.count, cells[column].character != " " else { return }
+        var start = column
+        var end = column
+        while start > 0, cells[start - 1].character != " " { start -= 1 }
+        while end + 1 < cells.count, cells[end + 1].character != " " { end += 1 }
+        selection = TerminalSelection(
+            anchor: TerminalCursor(row: row, column: start),
+            focus: TerminalCursor(row: row, column: end)
+        )
+    }
+
+    private func visibleRows(in cells: [[TerminalCell]]) -> Int {
+        let lastUsed = cells.lastIndex { row in row.contains { $0.character != " " } } ?? 0
+        if lastUsed >= 43 { return min(cells.count, 62) }
+        if lastUsed >= 24 { return min(cells.count, 43) }
+        return min(cells.count, 24)
     }
 
     private func copySelectionToClipboard() {
@@ -200,7 +310,7 @@ private struct X3270TerminalPane: View {
         }
 
         let range = selection.normalized
-        let rows = session.screenCells
+        let rows = activeCells
         guard !rows.isEmpty else { return "" }
 
         return (range.start.row...range.end.row).compactMap { row in
@@ -216,7 +326,7 @@ private struct X3270TerminalPane: View {
     }
 
     private func fullScreenText() -> String {
-        session.screenCells
+        activeCells
             .map { String($0.map(\.character)).trimmedRight() }
             .joined(separator: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -698,6 +808,12 @@ private struct X3270StatusBar: View {
                 .lineLimit(1)
                 .foregroundStyle(statusColor)
 
+            if session.isKeyboardLocked {
+                statusBadge("LOCK: \(session.keyboardLock)")
+            } else {
+                statusBadge(session.isInsertMode ? "INSERT" : "READY")
+            }
+
             statusBadge("Model \(session.terminalModel.rawValue)")
             statusBadge("\(session.displayRows) zichtbaar")
             statusBadge("\(session.rows)x\(session.columns)")
@@ -732,75 +848,6 @@ private struct X3270StatusBar: View {
             .frame(height: 22)
             .background(X3270Colors.controlBackground)
             .clipShape(RoundedRectangle(cornerRadius: 7))
-    }
-}
-
-private struct X3270UpdateDialog: View {
-    @Environment(\.dismiss) private var dismiss
-    let update: AppUpdate
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack(alignment: .top, spacing: 14) {
-                Image(systemName: "arrow.down.circle.fill")
-                    .font(.system(size: 32, weight: .semibold))
-                    .foregroundStyle(X3270Colors.accent)
-
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Nieuwe versie beschikbaar")
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(X3270Colors.primaryText)
-
-                    Text("\(update.title) staat op GitHub.")
-                        .font(.system(size: 13))
-                        .foregroundStyle(X3270Colors.secondaryText)
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Wat is er veranderd")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(X3270Colors.mutedText)
-
-                ScrollView {
-                    Text(update.changelog.isEmpty ? "Geen changelog opgegeven voor deze release." : update.changelog)
-                        .font(.system(size: 13))
-                        .foregroundStyle(X3270Colors.secondaryText)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .textSelection(.enabled)
-                }
-                .frame(minHeight: 140, maxHeight: 240)
-                .padding(12)
-                .background(X3270Colors.controlBackground)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(X3270Colors.border, lineWidth: 1)
-                )
-            }
-
-            Text("Swift3270 downloadt of installeert updates niet automatisch. Je opent alleen de GitHub release en beslist zelf wat je doet.")
-                .font(.system(size: 12))
-                .foregroundStyle(X3270Colors.mutedText)
-
-            HStack {
-                Button("Later") {
-                    dismiss()
-                }
-                .buttonStyle(.bordered)
-
-                Spacer()
-
-                Button("Open GitHub release") {
-                    NSWorkspace.shared.open(update.url)
-                    dismiss()
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(X3270Colors.accent)
-            }
-        }
-        .padding(22)
-        .frame(width: 520)
-        .background(X3270Colors.panelBackground)
     }
 }
 

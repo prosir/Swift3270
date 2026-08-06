@@ -89,17 +89,19 @@ No need to type `L:`, `Y:` or `A:` manually. The wizard builds the x3270 host st
 
 ## Version updates
 
-At startup Swift3270 checks the latest GitHub release metadata. If a newer version exists, the app shows a small update window with the release changelog.
+During the compact startup screen Swift3270 checks the latest published GitHub Release. If a newer version exists, the startup screen shows its release notes before opening the terminal.
 
 The update check only requests public release information from GitHub. Swift3270 does not send terminal data, hostnames, session profiles or screen contents.
 
-Updates are not downloaded or installed automatically. The button opens the GitHub release page, so you can decide yourself whether to build/install the newer version.
+New releases contain `Swift3270-macOS.zip` and a SHA-256 checksum. After confirmation, Swift3270 downloads both files, validates the checksum and app identity, replaces the current app bundle and relaunches. Releases made before this updater was introduced still fall back to the GitHub release page.
 
 To publish a new visible version:
 
 1. Create a GitHub release with a tag like `v0.1.2`.
 2. Put the changelog in the GitHub release notes.
-3. Build the app locally with the same version:
+3. Publish the release. GitHub Actions builds the app with the release tag as version and attaches the app archive and checksum automatically.
+
+For a local build with the same version:
 
 ```bash
 SWIFT3270_VERSION=0.1.2 SWIFT3270_BUILD=3 ./Scripts/build-app.sh
@@ -143,9 +145,9 @@ Certificate exceptions are explicit checkboxes. Normal certificate validation st
 
 ## Builds and releases
 
-GitHub Actions only checks that the Swift package builds.
+GitHub Actions checks that the Swift package builds. When a GitHub Release is published, the release job also builds `Swift3270.app`, creates `Swift3270-macOS.zip` plus its SHA-256 checksum, and attaches both to that release.
 
-Automatic `.app` releases are intentionally disabled. A proper distributable macOS app needs signing/notarization with an Apple Developer account. Without that, the safest option is to build the app locally and share it manually when needed.
+The updater validates the downloaded checksum, bundle identifier, executable and release version before installation. Code signing and notarization can be added later; the release checksum already prevents corrupted or mismatched archives from being installed.
 
 Local app bundle:
 
@@ -154,7 +156,7 @@ Local app bundle:
 cp -R Swift3270.app /Applications/
 ```
 
-Manual GitHub workflow runs can upload the raw release binary as a build artifact, but not a packaged `.app`.
+Manual GitHub workflow runs can still upload the raw release binary as a build artifact. Published releases receive the packaged `.app` automatically.
 
 ## Troubleshooting
 

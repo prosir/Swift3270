@@ -8,6 +8,7 @@ struct TerminalGridView: View {
     let cursor: TerminalCursor
     let theme: TerminalTheme
     let selection: TerminalSelection?
+    let searchMatches: Set<TerminalCursor>
 
     var body: some View {
         let cellWidth = TerminalMetrics.cellWidth(fontSize)
@@ -23,6 +24,7 @@ struct TerminalGridView: View {
                     let column = cell.column
                     let isCursor = cursor.row == row && cursor.column == column
                     let isSelected = selection?.contains(row: row, column: column) == true
+                    let isSearchMatch = searchMatches.contains(TerminalCursor(row: row, column: column))
                     let rect = CGRect(
                         x: 6 + CGFloat(column) * cellWidth,
                         y: 6 + CGFloat(row) * lineHeight,
@@ -30,8 +32,10 @@ struct TerminalGridView: View {
                         height: lineHeight
                     )
 
-                    if shouldDrawBackground(for: cell, isCursor: isCursor, isSelected: isSelected) {
-                        let background = background(for: cell, isCursor: isCursor, isSelected: isSelected)
+                    if shouldDrawBackground(for: cell, isCursor: isCursor, isSelected: isSelected) || isSearchMatch {
+                        let background = isSearchMatch && !isCursor && !isSelected
+                            ? Color(red: 1.0, green: 0.82, blue: 0.20)
+                            : background(for: cell, isCursor: isCursor, isSelected: isSelected)
                         context.fill(Path(rect), with: .color(background))
                     }
 
@@ -40,7 +44,9 @@ struct TerminalGridView: View {
                             Text(String(cell.character))
                                 .font(.system(size: fontSize, weight: .regular, design: .monospaced))
                         )
-                        text.shading = .color(textColor(for: cell, isCursor: isCursor, isSelected: isSelected))
+                        text.shading = .color(isSearchMatch && !isCursor && !isSelected
+                            ? Color.black
+                            : textColor(for: cell, isCursor: isCursor, isSelected: isSelected))
                         context.draw(text, at: CGPoint(x: rect.midX, y: rect.midY), anchor: .center)
                     }
 

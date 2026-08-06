@@ -1,5 +1,19 @@
 # Changelog
 
+## Volgende release
+
+### Nieuw
+
+- Compact opstartscherm controleert automatisch op gepubliceerde GitHub Releases.
+- Release notes worden vóór het openen van de terminal in het opstartscherm getoond.
+- Updates kunnen vanuit Swift3270 worden gedownload, gecontroleerd, geïnstalleerd en herstart.
+- GitHub Actions voegt automatisch `Swift3270-macOS.zip` en een SHA-256-checksum aan nieuwe releases toe.
+
+### Veiligheid
+
+- Een update wordt alleen geïnstalleerd als checksum, bundle-ID, executable en releaseversie kloppen.
+- Een mislukte vervanging herstelt de vorige app-bundle uit de tijdelijke back-up.
+
 ## v0.1.2
 
 Deze versie maakt Swift3270 vooral praktischer voor dagelijks gebruik en eerlijker rondom releases.
@@ -41,4 +55,3 @@ SWIFT3270_VERSION=0.1.2 SWIFT3270_BUILD=3 ./Scripts/build-app.sh
 ### Bekend
 
 - App icon generatie kan lokaal nog een `Invalid Iconset` waarschuwing geven. De build gaat dan gewoon door zonder custom icon.
-

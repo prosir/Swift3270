@@ -12,18 +12,21 @@ actor B3270Backend {
     private let model: Int
     private let oversize: String?
     private let screenEventHandler: @Sendable (B3270ScreenEvent) -> Void
+    private let statusEventHandler: @Sendable (B3270StatusEvent) -> Void
 
     init(
         codePage: String = "cp037",
         model: Int = 4,
         oversize: String? = nil,
-        screenEventHandler: @escaping @Sendable (B3270ScreenEvent) -> Void = { _ in }
+        screenEventHandler: @escaping @Sendable (B3270ScreenEvent) -> Void = { _ in },
+        statusEventHandler: @escaping @Sendable (B3270StatusEvent) -> Void = { _ in }
     ) {
         let override = ProcessInfo.processInfo.environment["SWIFT3270_CODEPAGE"]?.trimmingCharacters(in: .whitespacesAndNewlines)
         self.codePage = override?.isEmpty == false ? override! : codePage
         self.model = model
         self.oversize = oversize
         self.screenEventHandler = screenEventHandler
+        self.statusEventHandler = statusEventHandler
     }
 
     func start() throws {
@@ -250,6 +253,9 @@ actor B3270Backend {
             if let screenEvent = B3270ScreenEvent(object: object) {
                 screenEventHandler(screenEvent)
             }
+            if let statusEvent = B3270StatusEvent(object: object) {
+                statusEventHandler(statusEvent)
+            }
 
             guard let result = object["run-result"] as? [String: Any] else {
                 continue
@@ -296,6 +302,27 @@ actor B3270Backend {
         )
     }
 
+}
+
+struct B3270StatusEvent: Sendable {
+    let lock: String?
+    let insertMode: Bool?
+
+    init?(object: [String: Any]) {
+        if let oia = object["oia"] as? [String: Any],
+           oia["field"] as? String == "lock" {
+            lock = oia["value"] as? String
+            insertMode = nil
+            return
+        }
+        if let setting = object["setting"] as? [String: Any],
+           setting["name"] as? String == "insertMode" {
+            lock = nil
+            insertMode = setting["value"] as? Bool
+            return
+        }
+        return nil
+    }
 }
 
 enum B3270Error: LocalizedError {

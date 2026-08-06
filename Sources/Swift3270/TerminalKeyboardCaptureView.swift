@@ -8,6 +8,8 @@ struct TerminalKeyboardCaptureView: NSViewRepresentable {
     let columns: Int
     var onCopy: () -> Void
     var onPaste: (String) -> Void
+    var onFind: () -> Void
+    var onHistoryScroll: (Int) -> Void
     var onEvent: (TerminalKeyEvent) -> Void
 
     func makeNSView(context: Context) -> KeyCaptureNSView {
@@ -18,6 +20,8 @@ struct TerminalKeyboardCaptureView: NSViewRepresentable {
         view.columns = columns
         view.onCopy = onCopy
         view.onPaste = onPaste
+        view.onFind = onFind
+        view.onHistoryScroll = onHistoryScroll
         view.onEvent = onEvent
         DispatchQueue.main.async {
             view.window?.makeFirstResponder(view)
@@ -32,6 +36,8 @@ struct TerminalKeyboardCaptureView: NSViewRepresentable {
         nsView.columns = columns
         nsView.onCopy = onCopy
         nsView.onPaste = onPaste
+        nsView.onFind = onFind
+        nsView.onHistoryScroll = onHistoryScroll
         nsView.onEvent = onEvent
     }
 }
@@ -59,6 +65,7 @@ enum TerminalKeyEvent {
     case selectionStarted(row: Int, column: Int)
     case selectionChanged(row: Int, column: Int)
     case selectionEnded
+    case selectWord(row: Int, column: Int)
     case pf(Int)
 }
 
@@ -69,11 +76,19 @@ final class KeyCaptureNSView: NSView {
     var columns: Int = 80
     var onCopy: (() -> Void)?
     var onPaste: ((String) -> Void)?
+    var onFind: (() -> Void)?
+    var onHistoryScroll: ((Int) -> Void)?
     var onEvent: ((TerminalKeyEvent) -> Void)?
     private var selectionAnchor: (row: Int, column: Int)?
     private var mouseDownPoint: NSPoint?
     private var didDragSelection = false
+    private var ignoreNextMouseUp = false
     private let selectionDragThreshold: CGFloat = 4
+    private var accumulatedScrollX: CGFloat = 0
+    private var accumulatedScrollY: CGFloat = 0
+    private var lastScrollActionAt = Date.distantPast
+    private let trackpadScrollThreshold: CGFloat = 24
+    private let scrollActionInterval: TimeInterval = 0.16
 
     override var acceptsFirstResponder: Bool { true }
 
@@ -88,6 +103,14 @@ final class KeyCaptureNSView: NSView {
         window?.makeFirstResponder(self)
         let point = convert(event.locationInWindow, from: nil)
         if let position = terminalPosition(for: point) {
+            if event.clickCount == 2 {
+                ignoreNextMouseUp = true
+                selectionAnchor = nil
+                mouseDownPoint = nil
+                didDragSelection = false
+                onEvent?(.selectWord(row: position.row, column: position.column))
+                return
+            }
             selectionAnchor = position
             mouseDownPoint = point
             didDragSelection = false
@@ -106,6 +129,10 @@ final class KeyCaptureNSView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if ignoreNextMouseUp {
+            ignoreNextMouseUp = false
+            return
+        }
         defer {
             selectionAnchor = nil
             mouseDownPoint = nil
@@ -121,6 +148,50 @@ final class KeyCaptureNSView: NSView {
         }
     }
 
+    override func scrollWheel(with event: NSEvent) {
+        window?.makeFirstResponder(self)
+
+        if event.phase == .began {
+            accumulatedScrollX = 0
+            accumulatedScrollY = 0
+        }
+
+        // Momentum can otherwise keep sending PF keys after the fingers have
+        // already left the trackpad.
+        guard event.momentumPhase == [] else { return }
+
+        accumulatedScrollX += event.scrollingDeltaX
+        accumulatedScrollY += event.scrollingDeltaY
+
+        let now = Date()
+        guard now.timeIntervalSince(lastScrollActionAt) >= scrollActionInterval else { return }
+
+        let horizontal = abs(accumulatedScrollX)
+        let vertical = abs(accumulatedScrollY)
+        let threshold = event.hasPreciseScrollingDeltas ? trackpadScrollThreshold : 1
+
+        if vertical >= threshold, vertical >= horizontal {
+            if event.modifierFlags.contains(.option) {
+                onHistoryScroll?(accumulatedScrollY > 0 ? 1 : -1)
+            } else {
+                onEvent?(accumulatedScrollY > 0 ? .pageUp : .pageDown)
+            }
+            accumulatedScrollX = 0
+            accumulatedScrollY = 0
+            lastScrollActionAt = now
+        } else if horizontal >= threshold {
+            onEvent?(.pf(accumulatedScrollX > 0 ? 10 : 11))
+            accumulatedScrollX = 0
+            accumulatedScrollY = 0
+            lastScrollActionAt = now
+        }
+
+        if event.phase == .ended || event.phase == .cancelled {
+            accumulatedScrollX = 0
+            accumulatedScrollY = 0
+        }
+    }
+
     override func keyDown(with event: NSEvent) {
         if event.modifierFlags.contains(.command) {
             if event.charactersIgnoringModifiers?.lowercased() == "c" {
@@ -131,6 +202,10 @@ final class KeyCaptureNSView: NSView {
                 if let text = NSPasteboard.general.string(forType: .string), !text.isEmpty {
                     onPaste?(text)
                 }
+                return
+            }
+            if event.charactersIgnoringModifiers?.lowercased() == "f" {
+                onFind?()
                 return
             }
             super.keyDown(with: event)
