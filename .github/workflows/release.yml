@@ -72,4 +72,5 @@ jobs:
           gh release upload "$RELEASE_TAG" \
             Swift3270-macOS.zip \
             Swift3270-macOS.zip.sha256 \
+            --repo "$GITHUB_REPOSITORY" \
             --clobber
