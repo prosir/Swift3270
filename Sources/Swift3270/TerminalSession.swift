@@ -355,6 +355,36 @@ final class TerminalSession: ObservableObject, Identifiable {
         await send(label: "EraseEOF") { try await backend.eraseEOF() }
     }
 
+    func toggleInsertMode() async {
+        await flushDirectText()
+        await send(label: "Insert") { try await backend.toggleInsertMode() }
+    }
+
+    func cutText(row: Int, column: Int, count: Int) async {
+        guard isConnected, count > 0 else { return }
+        await flushDirectText()
+        let shouldRestoreInsertMode = isInsertMode
+        var insertModeWasDisabled = false
+        do {
+            if shouldRestoreInsertMode {
+                try await backend.toggleInsertMode()
+                insertModeWasDisabled = true
+            }
+            try await backend.moveCursor(row: row, column: column)
+            try await backend.sendText(String(repeating: " ", count: count))
+            if insertModeWasDisabled {
+                try await backend.toggleInsertMode()
+                insertModeWasDisabled = false
+            }
+            statusText = "Tekst geknipt"
+        } catch {
+            if insertModeWasDisabled {
+                try? await backend.toggleInsertMode()
+            }
+            handleOperationFailure(error, action: "Knippen")
+        }
+    }
+
     func sendFieldMark() async {
         await send(label: "FieldMark") { try await backend.fieldMark() }
     }
@@ -457,6 +487,8 @@ final class TerminalSession: ObservableObject, Identifiable {
             case .eraseEOF:
                 await flushDirectText()
                 await sendEraseEOF()
+            case .toggleInsert:
+                await toggleInsertMode()
             case .tab:
                 await flushDirectText()
                 await send(label: "Tab") { try await backend.tab() }
@@ -496,7 +528,7 @@ final class TerminalSession: ObservableObject, Identifiable {
             case .moveCursor(let row, let column):
                 await flushDirectText()
                 await send(label: "MoveCursor") { try await backend.moveCursor(row: row, column: column) }
-            case .selectionStarted, .selectionChanged, .selectionEnded, .selectWord:
+            case .selectionStarted, .selectionChanged, .selectionEnded, .selectWord, .extendSelection:
                 break
             case .reset:
                 await flushDirectText()

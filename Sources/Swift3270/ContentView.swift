@@ -225,7 +225,10 @@ private struct X3270TerminalPane: View {
                     columns: session.columns,
                     capabilities: plugins.activeCapabilities,
                     onCopy: {
-                    copySelectionToClipboard()
+                        copySelectionToClipboard()
+                    },
+                    onCut: {
+                        cutSelectionToClipboard()
                     },
                     onPaste: { text in
                         pasteText(text)
@@ -354,6 +357,8 @@ private struct X3270TerminalPane: View {
             break
         case .selectWord(let row, let column):
             selectWord(row: row, column: column)
+        case .extendSelection(let rowDelta, let columnDelta):
+            extendSelection(rowDelta: rowDelta, columnDelta: columnDelta)
         case .moveCursor:
             selection = nil
             historyOffset = 0
@@ -381,6 +386,26 @@ private struct X3270TerminalPane: View {
         )
     }
 
+    private func extendSelection(rowDelta: Int, columnDelta: Int) {
+        guard !activeCells.isEmpty else { return }
+
+        let lastRow = activeCells.count - 1
+        let startingCursor = selection?.focus ?? session.cursor
+        let startRow = min(lastRow, max(0, startingCursor.row))
+        let startLastColumn = max(0, activeCells[startRow].count - 1)
+        let startColumn = min(startLastColumn, max(0, startingCursor.column))
+        let start = TerminalCursor(row: startRow, column: startColumn)
+        let anchor = selection?.anchor ?? start
+
+        let nextRow = min(lastRow, max(0, start.row + rowDelta))
+        let nextLastColumn = max(0, activeCells[nextRow].count - 1)
+        let nextColumn = min(nextLastColumn, max(0, start.column + columnDelta))
+        selection = TerminalSelection(
+            anchor: anchor,
+            focus: TerminalCursor(row: nextRow, column: nextColumn)
+        )
+    }
+
     private func visibleRows(in cells: [[TerminalCell]]) -> Int {
         let lastUsed = cells.lastIndex { row in row.contains { $0.character != " " } } ?? 0
         if lastUsed >= 43 { return min(cells.count, 62) }
@@ -394,6 +419,26 @@ private struct X3270TerminalPane: View {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
+    }
+
+    private func cutSelectionToClipboard() {
+        guard let selection else { return }
+        let range = selection.normalized
+        guard historyOffset == 0, range.start.row == range.end.row else {
+            copySelectionToClipboard()
+            return
+        }
+
+        copySelectionToClipboard()
+        self.selection = nil
+        let count = range.end.column - range.start.column + 1
+        Task {
+            await session.cutText(
+                row: range.start.row,
+                column: range.start.column,
+                count: count
+            )
+        }
     }
 
     private func pasteText(_ text: String) {

@@ -8,6 +8,7 @@ struct TerminalKeyboardCaptureView: NSViewRepresentable {
     let columns: Int
     let capabilities: TerminalPluginCapabilities
     var onCopy: () -> Void
+    var onCut: () -> Void
     var onPaste: (String) -> Void
     var onFind: () -> Void
     var onHistoryScroll: (Int) -> Void
@@ -21,6 +22,7 @@ struct TerminalKeyboardCaptureView: NSViewRepresentable {
         view.columns = columns
         view.capabilities = capabilities
         view.onCopy = onCopy
+        view.onCut = onCut
         view.onPaste = onPaste
         view.onFind = onFind
         view.onHistoryScroll = onHistoryScroll
@@ -38,6 +40,7 @@ struct TerminalKeyboardCaptureView: NSViewRepresentable {
         nsView.columns = columns
         nsView.capabilities = capabilities
         nsView.onCopy = onCopy
+        nsView.onCut = onCut
         nsView.onPaste = onPaste
         nsView.onFind = onFind
         nsView.onHistoryScroll = onHistoryScroll
@@ -51,6 +54,7 @@ enum TerminalKeyEvent {
     case erase
     case delete
     case eraseEOF
+    case toggleInsert
     case tab
     case backTab
     case reset
@@ -69,6 +73,7 @@ enum TerminalKeyEvent {
     case selectionChanged(row: Int, column: Int)
     case selectionEnded
     case selectWord(row: Int, column: Int)
+    case extendSelection(rowDelta: Int, columnDelta: Int)
     case pf(Int)
 }
 
@@ -79,6 +84,7 @@ final class KeyCaptureNSView: NSView {
     var columns: Int = 80
     var capabilities: TerminalPluginCapabilities = []
     var onCopy: (() -> Void)?
+    var onCut: (() -> Void)?
     var onPaste: ((String) -> Void)?
     var onFind: (() -> Void)?
     var onHistoryScroll: ((Int) -> Void)?
@@ -203,9 +209,19 @@ final class KeyCaptureNSView: NSView {
 
     override func keyDown(with event: NSEvent) {
         if event.modifierFlags.contains(.command) {
+            if event.modifierFlags.contains(.shift),
+               event.charactersIgnoringModifiers?.lowercased() == "i" {
+                onEvent?(.toggleInsert)
+                return
+            }
             if event.charactersIgnoringModifiers?.lowercased() == "c",
                capabilities.contains(.clipboard) {
                 onCopy?()
+                return
+            }
+            if event.charactersIgnoringModifiers?.lowercased() == "x",
+               capabilities.contains(.clipboard) {
+                onCut?()
                 return
             }
             if event.charactersIgnoringModifiers?.lowercased() == "v",
@@ -253,6 +269,14 @@ final class KeyCaptureNSView: NSView {
             return .attn
         case 124 where event.modifierFlags.contains(.control):
             return .sysReq
+        case 123 where event.modifierFlags.contains(.shift):
+            return .extendSelection(rowDelta: 0, columnDelta: -1)
+        case 124 where event.modifierFlags.contains(.shift):
+            return .extendSelection(rowDelta: 0, columnDelta: 1)
+        case 125 where event.modifierFlags.contains(.shift):
+            return .extendSelection(rowDelta: 1, columnDelta: 0)
+        case 126 where event.modifierFlags.contains(.shift):
+            return .extendSelection(rowDelta: -1, columnDelta: 0)
         case 123:
             return .left
         case 124:
@@ -265,6 +289,8 @@ final class KeyCaptureNSView: NSView {
             return .home
         case 119:
             return .end
+        case 114:
+            return .toggleInsert
         case 116:
             return .pageUp
         case 121:

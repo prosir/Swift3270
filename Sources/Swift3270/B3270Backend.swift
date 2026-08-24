@@ -116,6 +116,10 @@ actor B3270Backend {
         _ = try await run(action: "EraseEOF")
     }
 
+    func toggleInsertMode() async throws {
+        _ = try await run(action: "ToggleInsert")
+    }
+
     func tab() async throws {
         _ = try await run(action: "Tab")
     }
