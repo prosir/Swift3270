@@ -54,6 +54,7 @@ enum TerminalKeyEvent {
     case erase
     case delete
     case eraseEOF
+    case enableInsert
     case toggleInsert
     case tab
     case backTab
@@ -69,7 +70,7 @@ enum TerminalKeyEvent {
     case attn
     case sysReq
     case moveCursor(row: Int, column: Int)
-    case selectionStarted(row: Int, column: Int)
+    case selectionStarted(row: Int, column: Int, rectangular: Bool)
     case selectionChanged(row: Int, column: Int)
     case selectionEnded
     case selectWord(row: Int, column: Int)
@@ -128,12 +129,16 @@ final class KeyCaptureNSView: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard capabilities.contains(.smartSelection) else { return }
+        guard capabilities.contains(.smartSelection) || capabilities.contains(.boxSelection) else { return }
         let point = convert(event.locationInWindow, from: nil)
         guard didDragSelection || hasMovedPastSelectionThreshold(point) else { return }
         guard let position = terminalPosition(for: point) else { return }
         if !didDragSelection, let anchor = selectionAnchor {
-            onEvent?(.selectionStarted(row: anchor.row, column: anchor.column))
+            onEvent?(.selectionStarted(
+                row: anchor.row,
+                column: anchor.column,
+                rectangular: capabilities.contains(.boxSelection)
+            ))
         }
         didDragSelection = true
         onEvent?(.selectionChanged(row: position.row, column: position.column))
@@ -211,7 +216,7 @@ final class KeyCaptureNSView: NSView {
         if event.modifierFlags.contains(.command) {
             if event.modifierFlags.contains(.shift),
                event.charactersIgnoringModifiers?.lowercased() == "i" {
-                onEvent?(.toggleInsert)
+                onEvent?(.enableInsert)
                 return
             }
             if event.charactersIgnoringModifiers?.lowercased() == "c",

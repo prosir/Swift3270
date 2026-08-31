@@ -68,6 +68,10 @@ struct ContentView: View {
             X3270StatusBar(session: store.selectedSession)
         }
         .background(X3270Colors.appBackground)
+        .overlay(alignment: .top) {
+            X3270InputWarningBanner(session: store.selectedSession)
+                .padding(.top, 12)
+        }
         .tint(AppAccentTheme.color(forStoredValue: accentColorValue))
         .sheet(isPresented: $showConnectDialog) {
             X3270ConnectDialog(session: store.selectedSession)
@@ -136,6 +140,53 @@ struct ContentView: View {
         )
     }
 
+}
+
+private struct X3270InputWarningBanner: View {
+    @ObservedObject var session: TerminalSession
+
+    var body: some View {
+        Group {
+            if let message = session.inputWarning {
+                HStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(Color.orange)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Invoegen niet mogelijk")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text(message)
+                            .font(.system(size: 11))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Button {
+                        session.dismissInputWarning()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .bold))
+                            .frame(width: 22, height: 22)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Waarschuwing sluiten")
+                }
+                .foregroundStyle(Color.primary)
+                .padding(.leading, 14)
+                .padding(.trailing, 10)
+                .padding(.vertical, 10)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(Color.orange.opacity(0.45), lineWidth: 1)
+                }
+                .shadow(color: .black.opacity(0.28), radius: 14, y: 5)
+                .accessibilityElement(children: .combine)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: session.inputWarning)
+    }
 }
 
 private struct X3270SplitPaneHeader: View {
@@ -213,6 +264,7 @@ private struct X3270TerminalPane: View {
                 fontSize: fittedSize,
                 lineHeight: fittedLineHeight,
                 cursor: historyOffset == 0 ? session.cursor : TerminalCursor(row: -1, column: -1),
+                isInsertMode: session.isInsertMode,
                 theme: terminalTheme,
                 selection: selection,
                 searchMatches: []
@@ -343,16 +395,23 @@ private struct X3270TerminalPane: View {
         .onChange(of: plugins.isEnabled(capability: .smartSelection)) { enabled in
             if !enabled { selection = nil }
         }
+        .onChange(of: plugins.isEnabled(capability: .boxSelection)) { _ in
+            selection = nil
+        }
     }
 
     private func handleTerminalEvent(_ event: TerminalKeyEvent) {
         switch event {
-        case .selectionStarted(let row, let column):
+        case .selectionStarted(let row, let column, let rectangular):
             let cursor = TerminalCursor(row: row, column: column)
-            selection = TerminalSelection(anchor: cursor, focus: cursor)
+            selection = TerminalSelection(anchor: cursor, focus: cursor, isRectangular: rectangular)
         case .selectionChanged(let row, let column):
             guard let current = selection else { return }
-            selection = TerminalSelection(anchor: current.anchor, focus: TerminalCursor(row: row, column: column))
+            selection = TerminalSelection(
+                anchor: current.anchor,
+                focus: TerminalCursor(row: row, column: column),
+                isRectangular: current.isRectangular
+            )
         case .selectionEnded:
             break
         case .selectWord(let row, let column):
@@ -402,7 +461,8 @@ private struct X3270TerminalPane: View {
         let nextColumn = min(nextLastColumn, max(0, start.column + columnDelta))
         selection = TerminalSelection(
             anchor: anchor,
-            focus: TerminalCursor(row: nextRow, column: nextColumn)
+            focus: TerminalCursor(row: nextRow, column: nextColumn),
+            isRectangular: selection?.isRectangular ?? plugins.isEnabled(capability: .boxSelection)
         )
     }
 
@@ -462,8 +522,8 @@ private struct X3270TerminalPane: View {
         return (range.start.row...range.end.row).compactMap { row in
             guard row >= 0, row < rows.count else { return nil }
             let rowCells = rows[row]
-            let startColumn = row == range.start.row ? range.start.column : 0
-            let endColumn = row == range.end.row ? range.end.column : rowCells.count - 1
+            let startColumn = selection.isRectangular || row == range.start.row ? range.start.column : 0
+            let endColumn = selection.isRectangular || row == range.end.row ? range.end.column : rowCells.count - 1
             guard startColumn <= endColumn, startColumn < rowCells.count else { return "" }
             let safeEnd = min(endColumn, rowCells.count - 1)
             return String(rowCells[startColumn...safeEnd].map(\.character)).trimmedRight()

@@ -28,8 +28,12 @@ struct Swift3270App: App {
                     .keyboardShortcut("k", modifiers: [.command])
                 Button("Reset") { Task { await sessionStore.selectedSession.sendReset() } }
                 Button("Erase EOF") { Task { await sessionStore.selectedSession.sendEraseEOF() } }
-                Button("Insertmodus") { Task { await sessionStore.selectedSession.toggleInsertMode() } }
+                Button("Insertmodus aan") { Task { await sessionStore.selectedSession.enableInsertMode() } }
                     .keyboardShortcut("i", modifiers: [.command, .shift])
+                Button(pluginStore.isEnabled(capability: .boxSelection) ? "Vakselectie uit" : "Vakselectie aan") {
+                    pluginStore.toggle(capability: .boxSelection)
+                }
+                .keyboardShortcut("b", modifiers: [.command, .shift])
                 Divider()
                 ForEach(1...24, id: \.self) { index in
                     Button("PF\(index)") { Task { await sessionStore.selectedSession.sendPF(index) } }

@@ -12,6 +12,7 @@ struct TerminalPluginCapabilities: OptionSet, Hashable, Sendable {
     static let clipboard = Self(rawValue: 1 << 4)
     static let developerSplit = Self(rawValue: 1 << 5)
     static let personalization = Self(rawValue: 1 << 6)
+    static let boxSelection = Self(rawValue: 1 << 7)
 }
 
 enum AppAccentTheme: String, CaseIterable, Identifiable {
@@ -176,6 +177,14 @@ struct TerminalPlugin: Identifiable, Hashable {
             icon: "paintpalette.fill",
             version: "1.0",
             capabilities: .personalization
+        ),
+        TerminalPlugin(
+            id: "cobol-box-selection",
+            name: "COBOL Vakselectie",
+            summary: "Trek een strak selectievak over COBOL-kolommen. Schakel met Command-Shift-B.",
+            icon: "rectangle.dashed",
+            version: "1.0",
+            capabilities: .boxSelection
         )
     ]
 }
@@ -184,6 +193,7 @@ struct TerminalPlugin: Identifiable, Hashable {
 final class TerminalPluginStore: ObservableObject {
     private static let enabledPluginIDsKey = "Swift3270.enabledTerminalPlugins.v1"
     private static let personalizeMigrationKey = "Swift3270.plugin.personalizeIntroduced"
+    private static let boxSelectionMigrationKey = "Swift3270.plugin.boxSelectionIntroduced"
 
     @Published private(set) var enabledPluginIDs: Set<String> {
         didSet {
@@ -204,6 +214,10 @@ final class TerminalPluginStore: ObservableObject {
         if !UserDefaults.standard.bool(forKey: Self.personalizeMigrationKey) {
             initialIDs.insert("personalize")
             UserDefaults.standard.set(true, forKey: Self.personalizeMigrationKey)
+        }
+        if !UserDefaults.standard.bool(forKey: Self.boxSelectionMigrationKey) {
+            initialIDs.insert("cobol-box-selection")
+            UserDefaults.standard.set(true, forKey: Self.boxSelectionMigrationKey)
         }
         enabledPluginIDs = initialIDs
     }
@@ -234,6 +248,11 @@ final class TerminalPluginStore: ObservableObject {
         } else {
             enabledPluginIDs.remove(plugin.id)
         }
+    }
+
+    func toggle(capability: TerminalPluginCapabilities) {
+        guard let plugin = plugins.first(where: { $0.capabilities.contains(capability) }) else { return }
+        setEnabled(!isEnabled(plugin), plugin: plugin)
     }
 
     func binding(for plugin: TerminalPlugin) -> Binding<Bool> {

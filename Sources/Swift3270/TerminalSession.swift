@@ -13,6 +13,7 @@ final class TerminalSession: ObservableObject, Identifiable {
     @Published private(set) var isConnecting = false
     @Published private(set) var keyboardLock = "not-connected"
     @Published private(set) var isInsertMode = false
+    @Published private(set) var inputWarning: String?
     @Published private(set) var screenHistory: [TerminalSnapshot] = []
     @Published var terminalModel: TerminalModel = .model2
     @Published var activeError: TerminalSessionError?
@@ -51,6 +52,7 @@ final class TerminalSession: ObservableObject, Identifiable {
     private var directTextBuffer = ""
     private var directTextFlushTask: Task<Void, Never>?
     private var historyCaptureTask: Task<Void, Never>?
+    private var inputWarningTask: Task<Void, Never>?
     private var lastPresentedErrorSignature: String?
     var onProfileChanged: (() -> Void)?
 
@@ -360,6 +362,11 @@ final class TerminalSession: ObservableObject, Identifiable {
         await send(label: "Insert") { try await backend.toggleInsertMode() }
     }
 
+    func enableInsertMode() async {
+        await flushDirectText()
+        await send(label: "Insert aan") { try await backend.enableInsertMode() }
+    }
+
     func cutText(row: Int, column: Int, count: Int) async {
         guard isConnected, count > 0 else { return }
         await flushDirectText()
@@ -487,6 +494,8 @@ final class TerminalSession: ObservableObject, Identifiable {
             case .eraseEOF:
                 await flushDirectText()
                 await sendEraseEOF()
+            case .enableInsert:
+                await enableInsertMode()
             case .toggleInsert:
                 await toggleInsertMode()
             case .tab:
@@ -559,6 +568,13 @@ final class TerminalSession: ObservableObject, Identifiable {
         do {
             try await backend.sendText(text)
         } catch {
+            if case B3270Error.commandFailed(let message) = error,
+               message.localizedCaseInsensitiveContains("operator error") {
+                try? await backend.reset()
+                statusText = "Invoegen kan hier niet — het veld is vol of beveiligd"
+                showInputWarning()
+                return
+            }
             handleOperationFailure(error, action: "Typen")
         }
     }
@@ -771,8 +787,28 @@ final class TerminalSession: ObservableObject, Identifiable {
 
         if backendStopped {
             statusText = "Geen antwoord op \(action) — verbinding blijft actief"
+        } else if action == "Typen" {
+            statusText = "Typen niet verwerkt: \(error.localizedDescription)"
         } else {
             statusText = "\(action) tijdelijk niet verwerkt — probeer opnieuw"
+        }
+    }
+
+    func dismissInputWarning() {
+        inputWarningTask?.cancel()
+        inputWarningTask = nil
+        inputWarning = nil
+    }
+
+    private func showInputWarning() {
+        guard inputWarning == nil else { return }
+        inputWarning = "Geen ruimte om hier in te voegen · regel \(cursor.row + 1), kolom \(cursor.column + 1)"
+        inputWarningTask?.cancel()
+        inputWarningTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else { return }
+            self?.inputWarning = nil
+            self?.inputWarningTask = nil
         }
     }
 }

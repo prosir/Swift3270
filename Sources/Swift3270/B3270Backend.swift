@@ -41,7 +41,7 @@ actor B3270Backend {
         let errorOutput = Pipe()
 
         process.executableURL = executableURL
-        var arguments = ["-json", "-nowrapperdoc", "-model", "\(model)"]
+        var arguments = ["-json", "-nowrapperdoc", "-model", "\(model)", "-set", "blankFill"]
         if let oversize {
             arguments += ["-oversize", oversize]
         }
@@ -118,6 +118,10 @@ actor B3270Backend {
 
     func toggleInsertMode() async throws {
         _ = try await run(action: "ToggleInsert")
+    }
+
+    func enableInsertMode() async throws {
+        _ = try await run(action: "Insert")
     }
 
     func tab() async throws {
