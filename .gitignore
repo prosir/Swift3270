@@ -6,3 +6,4 @@
 *.dSYM/
 DerivedData/
 Package.resolved
+!Windows/Package.resolved

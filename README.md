@@ -1,6 +1,6 @@
 # Swift3270
 
-Swift3270 is een native 3270-terminal voor macOS. De app gebruikt de betrouwbare `b3270`-backend van x3270, met een moderne SwiftUI-interface.
+Swift3270 is een native 3270-terminal voor macOS. De app gebruikt de betrouwbare `b3270`-backend van x3270, met een moderne SwiftUI-interface. Er staat ook een eerste native [Windows-port](Windows/README.md) in deze repository.
 
 ## Functies
 
