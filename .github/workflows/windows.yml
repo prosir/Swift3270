@@ -1,0 +1,72 @@
+name: Windows
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Windows/**"
+      - ".github/workflows/windows.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "Windows/**"
+      - ".github/workflows/windows.yml"
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Swift 6.3
+        uses: compnerd/gha-setup-swift@main
+        with:
+          swift-version: swift-6.3-release
+          swift-build: 6.3-RELEASE
+
+      - name: Show toolchain
+        run: swift --version
+
+      - name: Test core
+        run: swift test --package-path Windows
+
+      - name: Build Windows app
+        run: swift build --package-path Windows -c release
+
+      - name: Package app
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem Windows\.build -Recurse -Filter Swift3270Windows.exe |
+            Where-Object { $_.FullName -match '[\\/]release[\\/]' } |
+            Select-Object -First 1
+          if (-not $exe) { throw 'Swift3270Windows.exe is niet gevonden' }
+
+          New-Item -ItemType Directory -Force Windows\dist | Out-Null
+          Copy-Item $exe.FullName Windows\dist\Swift3270.exe
+          Copy-Item Windows\README.md Windows\dist\README.md
+          Compress-Archive -Path Windows\dist\* -DestinationPath Swift3270-Windows.zip -Force
+          $hash = (Get-FileHash Swift3270-Windows.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  Swift3270-Windows.zip" | Set-Content Swift3270-Windows.zip.sha256
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Swift3270-Windows
+          path: |
+            Swift3270-Windows.zip
+            Swift3270-Windows.zip.sha256
+
+      - name: Attach files to published release
+        if: github.event_name == 'release'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" Swift3270-Windows.zip Swift3270-Windows.zip.sha256 --clobber
