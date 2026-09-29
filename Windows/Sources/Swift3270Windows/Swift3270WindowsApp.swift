@@ -1,5 +1,5 @@
-import DefaultBackend
 import SwiftCrossUI
+import WinUIBackend
 
 @main
 struct Swift3270WindowsApp: App {

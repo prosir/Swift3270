@@ -59,9 +59,6 @@ jobs:
       # GitHub's Windows runner while its static library is archived.
       - name: Build Windows app
         timeout-minutes: 40
-        env:
-          SCUI_DEFAULT_BACKEND: WinUIBackend
-          SCUI_LIBRARY_TYPE: static
         run: swift build --package-path Windows -c release --product Swift3270Windows --jobs 2
 
       - name: Package app

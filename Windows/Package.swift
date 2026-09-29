@@ -5,19 +5,18 @@ import Foundation
 
 // `swift test` builds more than only the selected test target on Windows. In
 // CI that would pull in the complete WinUI/CWinRT graph just to test the
-// platform-independent core. Keep a small, explicit core-only manifest mode.
+// platform-independent core. Core-only mode removes the app target while the
+// resolved dependency versions remain intact.
 let coreOnly = ProcessInfo.processInfo.environment["SWIFT3270_CORE_ONLY"] == "1"
 
 var products: [Product] = [
     .library(name: "Swift3270WindowsCore", targets: ["Swift3270WindowsCore"])
 ]
-let dependencies: [Package.Dependency] = coreOnly
-    ? []
-    : [
-        .package(url: "https://github.com/moreSwift/swift-cross-ui.git", exact: "0.9.0"),
-        // SwiftCrossUI 0.9 currently shares this dependency range.
-        .package(url: "https://github.com/swiftlang/swift-subprocess.git", exact: "0.4.0")
-    ]
+let dependencies: [Package.Dependency] = [
+    .package(url: "https://github.com/moreSwift/swift-cross-ui.git", exact: "0.9.0"),
+    // SwiftCrossUI 0.9 currently shares this dependency range.
+    .package(url: "https://github.com/swiftlang/swift-subprocess.git", exact: "0.4.0")
+]
 var targets: [Target] = [
     .target(name: "Swift3270WindowsCore"),
     .testTarget(
@@ -35,7 +34,7 @@ if !coreOnly {
             dependencies: [
                 "Swift3270WindowsCore",
                 .product(name: "SwiftCrossUI", package: "swift-cross-ui"),
-                .product(name: "DefaultBackend", package: "swift-cross-ui"),
+                .product(name: "WinUIBackend", package: "swift-cross-ui"),
                 .product(name: "Subprocess", package: "swift-subprocess")
             ]
         ),
