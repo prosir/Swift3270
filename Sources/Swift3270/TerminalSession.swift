@@ -1,15 +1,17 @@
 import Foundation
 
-private enum AutomaticLoginField {
+private enum AutomaticLoginField: Equatable {
     case application
     case userID
     case password
+    case cicsCredentials
 
     var label: String {
         switch self {
         case .application: "toepassing"
         case .userID: "userid"
         case .password: "password"
+        case .cicsCredentials: "CICS userid en password"
         }
     }
 }
@@ -785,12 +787,17 @@ final class TerminalSession: ObservableObject, Identifiable {
 
     private func autofillLoginIfNeeded() async {
         guard profile.autoFillPassphrase, isConnected else { return }
+        let upperScreen = screenLines.joined(separator: "\n").uppercased()
+        let isCICSCredentialsScreen = upperScreen.contains("ENTER USER-ID AND PASSWORD OR PASSWORD PHRASE")
+            && upperScreen.contains("PASSWORD/PHRASE")
         let prompts = screenLines.enumerated().compactMap { row, line -> (Int, String, AutomaticLoginField)? in
             let upper = line.uppercased()
             let field: AutomaticLoginField
-            if upper.contains("KIES UW TOEPASSING") {
+            if isCICSCredentialsScreen, upper.contains("USER-ID"), upper.contains("==>") {
+                field = .cicsCredentials
+            } else if upper.contains("KIES UW TOEPASSING") {
                 field = .application
-            } else if upper.contains("ENTER USERID") {
+            } else if upper.contains("ENTER USERID") || upper.contains("ENTER USER-ID") {
                 field = .userID
             } else if upper.contains("PASSPHRASE")
                         || upper.contains("PASS PHRASE")
@@ -812,6 +819,21 @@ final class TerminalSession: ObservableObject, Identifiable {
         guard promptKey != lastAutofilledPromptKey else { return }
 
         do {
+            if prompt.2 == .cicsCredentials {
+                let password = try PassphraseKeychain.load(for: profile.id) ?? ""
+                guard !profile.userID.isEmpty, !password.isEmpty else {
+                    statusText = "CICS-login herkend, maar userid of password ontbreekt in de sessie"
+                    return
+                }
+                lastAutofilledPromptKey = promptKey
+                try await backend.sendText(profile.userID)
+                try await backend.tab()
+                try await backend.sendText(password)
+                try await backend.enter()
+                statusText = "Automatische CICS-login: userid en password ingevuld en bevestigd"
+                return
+            }
+
             let value: String
             switch prompt.2 {
             case .application:
@@ -820,6 +842,8 @@ final class TerminalSession: ObservableObject, Identifiable {
                 value = profile.userID
             case .password:
                 value = try PassphraseKeychain.load(for: profile.id) ?? ""
+            case .cicsCredentials:
+                return
             }
             guard !value.isEmpty else {
                 statusText = "Login-scherm herkend, maar \(prompt.2.label) ontbreekt in de sessie"
