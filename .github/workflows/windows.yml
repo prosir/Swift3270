@@ -43,7 +43,7 @@ jobs:
         timeout-minutes: 3
         env:
           SWIFT3270_CORE_ONLY: "1"
-        run: swift test --package-path Windows --scratch-path Windows/.build-core -c debug --jobs 4
+        run: swift test --package-path Windows --scratch-path "$env:RUNNER_TEMP\Swift3270-core" -c debug --jobs 4
 
   app-build:
     name: Windows app
