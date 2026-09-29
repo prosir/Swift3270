@@ -18,9 +18,37 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  core-tests:
+    name: Core tests
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Visual Studio environment
+        uses: seanmiddleditch/gha-setup-vsdevenv@v5
+
+      - name: Install Swift 6.3
+        uses: compnerd/gha-setup-swift@main
+        with:
+          swift-version: swift-6.3-release
+          swift-build: 6.3-RELEASE
+
+      - name: Show toolchain
+        run: swift --version
+
+      - name: Run Windows core tests
+        timeout-minutes: 3
+        env:
+          SWIFT3270_CORE_ONLY: "1"
+        run: swift test --package-path Windows --scratch-path Windows/.build-core -c debug --jobs 4
+
+  app-build:
+    name: Windows app
+    runs-on: windows-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -40,37 +68,6 @@ jobs:
       - name: Show toolchain
         run: swift --version
 
-      - name: Cache Swift dependencies
-        uses: actions/cache@v4
-        with:
-          path: Windows/.build
-          key: windows-swift-6.3-${{ hashFiles('Windows/Package.resolved') }}
-          restore-keys: |
-            windows-swift-6.3-
-
-      - name: Preserve dependency lockfile
-        shell: pwsh
-        run: Copy-Item Windows\Package.resolved "$env:RUNNER_TEMP\Swift3270-Package.resolved"
-
-      - name: Run Windows core tests
-        timeout-minutes: 10
-        env:
-          SWIFT3270_CORE_ONLY: "1"
-        run: swift test --package-path Windows -c release --jobs 2
-
-      # A dependency-free manifest can make SwiftPM remove Package.resolved.
-      # Restore the pinned versions before resolving the full WinUI graph.
-      - name: Restore dependency lockfile
-        if: always()
-        shell: pwsh
-        run: Copy-Item "$env:RUNNER_TEMP\Swift3270-Package.resolved" Windows\Package.resolved -Force
-
-      - name: Resolve Windows app dependencies
-        timeout-minutes: 10
-        run: swift package resolve --package-path Windows
-
-      # Release optimization is especially expensive for generated WinRT code.
-      # Keep ordinary CI fast; only published releases need an optimized build.
       - name: Select build configuration
         shell: pwsh
         run: |
@@ -78,14 +75,37 @@ jobs:
           "SWIFT3270_BUILD_CONFIGURATION=$configuration" | Out-File -FilePath $env:GITHUB_ENV -Append
           Write-Host "Windows build configuration: $configuration"
 
-      # CWinRT contains hundreds of generated source files. Build it separately
-      # from the core tests and limit concurrency to avoid memory pressure on
-      # GitHub's Windows runner while its static library is archived.
+      # Keep this cache separate from the core-test scratch directory. The
+      # previous workflow let the dependency-free test manifest overwrite the
+      # app workspace, so every run rebuilt all generated WinRT sources.
+      - name: Restore compiled WinUI cache
+        id: app-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: Windows/.build
+          key: windows-app-v3-swift-6.3-${{ github.event_name == 'release' && 'release' || 'debug' }}-${{ hashFiles('Windows/Package.swift', 'Windows/Package.resolved') }}
+          restore-keys: |
+            windows-app-v3-swift-6.3-${{ github.event_name == 'release' && 'release' || 'debug' }}-
+            windows-swift-6.3-
+
+      # Dependency resolution is deliberately left to this command, avoiding a
+      # second 90-second SwiftPM graph load. Four jobs match the hosted runner's
+      # CPU count and halve the cold-build bottleneck compared with --jobs 2.
       - name: Build Windows app
-        timeout-minutes: 40
-        run: swift build --package-path Windows -c $env:SWIFT3270_BUILD_CONFIGURATION --product Swift3270Windows --jobs 2
+        timeout-minutes: 25
+        run: swift build --package-path Windows -c $env:SWIFT3270_BUILD_CONFIGURATION --product Swift3270Windows --jobs 4
+
+      # Save immediately after compilation. A later packaging/upload failure
+      # must not discard another expensive, successful WinUI build.
+      - name: Save compiled WinUI cache
+        if: steps.app-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: Windows/.build
+          key: windows-app-v3-swift-6.3-${{ github.event_name == 'release' && 'release' || 'debug' }}-${{ hashFiles('Windows/Package.swift', 'Windows/Package.resolved') }}
 
       - name: Package app
+        if: github.event_name != 'push'
         shell: pwsh
         run: |
           $configuration = [regex]::Escape($env:SWIFT3270_BUILD_CONFIGURATION)
@@ -102,6 +122,7 @@ jobs:
           "$hash  Swift3270-Windows.zip" | Set-Content Swift3270-Windows.zip.sha256
 
       - name: Upload Windows artifact
+        if: github.event_name != 'push'
         uses: actions/upload-artifact@v4
         with:
           name: Swift3270-Windows

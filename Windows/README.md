@@ -346,4 +346,4 @@ swift build -c debug --product Swift3270Windows --jobs 2
 - `Sources/Swift3270Windows`: WinUI-interface en Windows-appmodel;
 - `Tests/Swift3270WindowsCoreTests`: tests die zonder Windows-interface kunnen draaien.
 
-De GitHub Actions-workflow bouwt en test de Windows-versie automatisch en maakt bij een release een Windows-archief met SHA-256-controlesommen.
+De GitHub Actions-workflow voert de core-tests en de Windows-appbuild parallel uit. De tests gebruiken een eigen scratchmap, zodat ze de kostbare WinUI-cache niet meer ongeldig maken. Een gewone push gebruikt een incrementele debug-build met vier compile-jobs; na de eerste koude build worden de gegenereerde WinRT-modules uit de cache hergebruikt. Daardoor horen volgende push-builds ongeveer twee tot drie minuten te duren. Een eerste build zonder cache en een geoptimaliseerde release-build blijven langer duren. Handmatige runs en releases maken daarnaast een Windows-archief met SHA-256-controlesommen; gewone pushes slaan die uploadstap over.
