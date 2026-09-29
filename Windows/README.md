@@ -178,27 +178,33 @@ De Core-only instelling voorkomt dat SwiftCrossUI, Android, Java en de grote Win
 
 ### 7. Bouw de Windows-app
 
-Maak daarna de volledige release-build:
+Maak voor ontwikkeling eerst een snelle debug-build:
 
 ```powershell
 swift package resolve
+swift build -c debug --product Swift3270Windows --jobs 2
+```
+
+Maak voor distributie een geoptimaliseerde release-build:
+
+```powershell
 swift build -c release --product Swift3270Windows --jobs 2
 ```
 
-De WinUI-afhankelijkheid bevat honderden gegenereerde bestanden. De eerste volledige build kan daardoor duidelijk langer duren dan de tests. Bij volgende builds helpt de SwiftPM-cache.
+De WinUI-afhankelijkheid bevat honderden gegenereerde bestanden. De eerste release-build kan daardoor veel langer duren dan de debug-build. Bij volgende builds helpt de SwiftPM-cache. GitHub Actions gebruikt debug voor gewone pushes en release uitsluitend voor een gepubliceerde GitHub Release.
 
 Zoek het gebouwde EXE-bestand:
 
 ```powershell
 Get-ChildItem .build -Recurse -Filter Swift3270Windows.exe |
-    Where-Object { $_.FullName -match '\\release\\' }
+    Where-Object { $_.FullName -match '\\(debug|release)\\' }
 ```
 
 Start de eerste gevonden release-build:
 
 ```powershell
 $app = Get-ChildItem .build -Recurse -Filter Swift3270Windows.exe |
-    Where-Object { $_.FullName -match '\\release\\' } |
+    Where-Object { $_.FullName -match '\\(debug|release)\\' } |
     Select-Object -First 1
 
 & $app.FullName
@@ -317,7 +323,7 @@ try {
 }
 if ($testExitCode -ne 0) { exit $testExitCode }
 swift package resolve
-swift build -c release --product Swift3270Windows --jobs 2
+swift build -c debug --product Swift3270Windows --jobs 2
 ```
 
 ## Wat de Windows-versie ondersteunt

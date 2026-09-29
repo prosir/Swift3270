@@ -69,18 +69,28 @@ jobs:
         timeout-minutes: 10
         run: swift package resolve --package-path Windows
 
+      # Release optimization is especially expensive for generated WinRT code.
+      # Keep ordinary CI fast; only published releases need an optimized build.
+      - name: Select build configuration
+        shell: pwsh
+        run: |
+          $configuration = if ("${{ github.event_name }}" -eq "release") { "release" } else { "debug" }
+          "SWIFT3270_BUILD_CONFIGURATION=$configuration" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Windows build configuration: $configuration"
+
       # CWinRT contains hundreds of generated source files. Build it separately
       # from the core tests and limit concurrency to avoid memory pressure on
       # GitHub's Windows runner while its static library is archived.
       - name: Build Windows app
         timeout-minutes: 40
-        run: swift build --package-path Windows -c release --product Swift3270Windows --jobs 2
+        run: swift build --package-path Windows -c $env:SWIFT3270_BUILD_CONFIGURATION --product Swift3270Windows --jobs 2
 
       - name: Package app
         shell: pwsh
         run: |
+          $configuration = [regex]::Escape($env:SWIFT3270_BUILD_CONFIGURATION)
           $exe = Get-ChildItem Windows\.build -Recurse -Filter Swift3270Windows.exe |
-            Where-Object { $_.FullName -match '[\\/]release[\\/]' } |
+            Where-Object { $_.FullName -match "[\\/]$configuration[\\/]" } |
             Select-Object -First 1
           if (-not $exe) { throw 'Swift3270Windows.exe is niet gevonden' }
 

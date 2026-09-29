@@ -1,6 +1,7 @@
 import Foundation
 import Subprocess
 import Swift3270WindowsCore
+import SystemPackage
 
 struct WS3270Configuration: Sendable {
     var executable: String

@@ -17,7 +17,9 @@ let dependencies: [Package.Dependency] = coreOnly
     : [
         .package(url: "https://github.com/moreSwift/swift-cross-ui.git", exact: "0.9.0"),
         // SwiftCrossUI 0.9 currently shares this dependency range.
-        .package(url: "https://github.com/swiftlang/swift-subprocess.git", exact: "0.4.0")
+        .package(url: "https://github.com/swiftlang/swift-subprocess.git", exact: "0.4.0"),
+        // FilePath is part of SystemPackage and is used by Executable.path.
+        .package(url: "https://github.com/apple/swift-system.git", from: "1.5.0")
     ]
 var targets: [Target] = [
     .target(name: "Swift3270WindowsCore"),
@@ -37,7 +39,8 @@ if !coreOnly {
                 "Swift3270WindowsCore",
                 .product(name: "SwiftCrossUI", package: "swift-cross-ui"),
                 .product(name: "WinUIBackend", package: "swift-cross-ui"),
-                .product(name: "Subprocess", package: "swift-subprocess")
+                .product(name: "Subprocess", package: "swift-subprocess"),
+                .product(name: "SystemPackage", package: "swift-system")
             ]
         ),
         at: 1
