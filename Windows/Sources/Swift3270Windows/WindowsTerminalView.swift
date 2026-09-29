@@ -9,6 +9,7 @@ struct WindowsTerminalView {
     let text: String
     let onAction: (String) -> Void
     let onCharacter: (Character) -> Void
+    let onPaste: (String) -> Void
 }
 
 extension WindowsTerminalView: WinUIElementRepresentable {
@@ -34,7 +35,13 @@ extension WindowsTerminalView: WinUIElementRepresentable {
         ScrollViewer.setVerticalScrollBarVisibility(terminal, .auto)
 
         terminal.keyDown.addHandler { _, event in
-            guard let event, let action = action(for: event.key) else { return }
+            guard let event else { return }
+            if event.key == .v, isKeyDown(.control) {
+                event.handled = true
+                pasteClipboardText()
+                return
+            }
+            guard let action = action(for: event.key, shiftDown: isKeyDown(.shift)) else { return }
             event.handled = true
             onAction(action)
         }
@@ -48,6 +55,23 @@ extension WindowsTerminalView: WinUIElementRepresentable {
         return terminal
     }
 
+    private func isKeyDown(_ key: UWP.VirtualKey) -> Bool {
+        guard let window = UWP.CoreWindow.getForCurrentThread(),
+              let state = try? window.getKeyState(key) else { return false }
+        return state.rawValue & UWP.CoreVirtualKeyStates.down.rawValue != 0
+    }
+
+    private func pasteClipboardText() {
+        Task {
+            guard let content = UWP.Clipboard.getContent(),
+                  (try? content.contains(UWP.StandardDataFormats.text)) == true,
+                  let operation = try? content.getTextAsync(),
+                  let value = try? await operation.get(),
+                  !value.isEmpty else { return }
+            onPaste(value)
+        }
+    }
+
     func updateWinUIElement(_ terminal: TextBox, context: Context) {
         guard terminal.text != text else { return }
         let selectionStart = terminal.selectionStart
@@ -58,9 +82,9 @@ extension WindowsTerminalView: WinUIElementRepresentable {
         }
     }
 
-    private func action(for key: UWP.VirtualKey) -> String? {
+    private func action(for key: UWP.VirtualKey, shiftDown: Bool) -> String? {
         if key == .enter { return "Enter" }
-        if key == .tab { return "Tab" }
+        if key == .tab { return shiftDown ? "BackTab" : "Tab" }
         if key == .back { return "BackSpace" }
         if key == .delete { return "Delete" }
         if key == .left { return "Left" }
@@ -71,18 +95,20 @@ extension WindowsTerminalView: WinUIElementRepresentable {
         if key == .end { return "FieldEnd" }
         if key == .insert { return "ToggleInsert" }
         if key == .escape { return "Reset" }
-        if key == .f1 { return "PF(1)" }
-        if key == .f2 { return "PF(2)" }
-        if key == .f3 { return "PF(3)" }
-        if key == .f4 { return "PF(4)" }
-        if key == .f5 { return "PF(5)" }
-        if key == .f6 { return "PF(6)" }
-        if key == .f7 { return "PF(7)" }
-        if key == .f8 { return "PF(8)" }
-        if key == .f9 { return "PF(9)" }
-        if key == .f10 { return "PF(10)" }
-        if key == .f11 { return "PF(11)" }
-        if key == .f12 { return "PF(12)" }
+        if key == .pageUp { return "PF(7)" }
+        if key == .pageDown { return "PF(8)" }
+        if key == .f1 { return "PF(\(shiftDown ? 13 : 1))" }
+        if key == .f2 { return "PF(\(shiftDown ? 14 : 2))" }
+        if key == .f3 { return "PF(\(shiftDown ? 15 : 3))" }
+        if key == .f4 { return "PF(\(shiftDown ? 16 : 4))" }
+        if key == .f5 { return "PF(\(shiftDown ? 17 : 5))" }
+        if key == .f6 { return "PF(\(shiftDown ? 18 : 6))" }
+        if key == .f7 { return "PF(\(shiftDown ? 19 : 7))" }
+        if key == .f8 { return "PF(\(shiftDown ? 20 : 8))" }
+        if key == .f9 { return "PF(\(shiftDown ? 21 : 9))" }
+        if key == .f10 { return "PF(\(shiftDown ? 22 : 10))" }
+        if key == .f11 { return "PF(\(shiftDown ? 23 : 11))" }
+        if key == .f12 { return "PF(\(shiftDown ? 24 : 12))" }
         if key == .f13 { return "PF(13)" }
         if key == .f14 { return "PF(14)" }
         if key == .f15 { return "PF(15)" }

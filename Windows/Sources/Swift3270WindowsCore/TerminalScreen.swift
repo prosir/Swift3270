@@ -38,7 +38,9 @@ public struct TerminalScreen: Equatable, Sendable {
 
     private static func normalize(_ lines: [String], rows: Int, columns: Int) -> [String] {
         let normalized = lines.prefix(rows).map { line in
-            String(line.padding(toLength: columns, withPad: " ", startingAt: 0).prefix(columns))
+            let characters = Array(line)
+            let visible = String(characters.prefix(columns))
+            return visible + String(repeating: " ", count: max(0, columns - visible.count))
         }
         return normalized + Array(repeating: String(repeating: " ", count: columns), count: max(0, rows - normalized.count))
     }

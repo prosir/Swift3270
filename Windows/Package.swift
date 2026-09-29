@@ -1,20 +1,35 @@
 // swift-tools-version: 6.2
 
 import PackageDescription
+import Foundation
 
-let package = Package(
-    name: "Swift3270Windows",
-    products: [
-        .executable(name: "Swift3270Windows", targets: ["Swift3270Windows"]),
-        .library(name: "Swift3270WindowsCore", targets: ["Swift3270WindowsCore"])
-    ],
-    dependencies: [
+// `swift test` builds more than only the selected test target on Windows. In
+// CI that would pull in the complete WinUI/CWinRT graph just to test the
+// platform-independent core. Keep a small, explicit core-only manifest mode.
+let coreOnly = ProcessInfo.processInfo.environment["SWIFT3270_CORE_ONLY"] == "1"
+
+var products: [Product] = [
+    .library(name: "Swift3270WindowsCore", targets: ["Swift3270WindowsCore"])
+]
+let dependencies: [Package.Dependency] = coreOnly
+    ? []
+    : [
         .package(url: "https://github.com/moreSwift/swift-cross-ui.git", exact: "0.9.0"),
         // SwiftCrossUI 0.9 currently shares this dependency range.
         .package(url: "https://github.com/swiftlang/swift-subprocess.git", exact: "0.4.0")
-    ],
-    targets: [
-        .target(name: "Swift3270WindowsCore"),
+    ]
+var targets: [Target] = [
+    .target(name: "Swift3270WindowsCore"),
+    .testTarget(
+        name: "Swift3270WindowsCoreTests",
+        dependencies: ["Swift3270WindowsCore"]
+    )
+]
+
+#if os(Windows)
+if !coreOnly {
+    products.insert(.executable(name: "Swift3270Windows", targets: ["Swift3270Windows"]), at: 0)
+    targets.insert(
         .executableTarget(
             name: "Swift3270Windows",
             dependencies: [
@@ -24,9 +39,15 @@ let package = Package(
                 .product(name: "Subprocess", package: "swift-subprocess")
             ]
         ),
-        .testTarget(
-            name: "Swift3270WindowsCoreTests",
-            dependencies: ["Swift3270WindowsCore"]
-        )
-    ]
+        at: 1
+    )
+}
+#endif
+
+let package = Package(
+    name: "Swift3270Windows",
+    platforms: [.macOS(.v13)],
+    products: products,
+    dependencies: dependencies,
+    targets: targets
 )
