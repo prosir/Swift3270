@@ -191,9 +191,10 @@ final class WindowsAppModel {
             .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return }
 #if os(Windows)
         let uri = WindowsFoundation.Uri("https://www.google.com/search?q=\(query)")
-        Task {
-            _ = try? await UWP.Launcher.launchUriAsync(uri).get()
-        }
+        // LaunchUriAsync starts immediately. We do not need its Bool result, and
+        // keeping the WinRT operation out of a Task avoids crossing an actor
+        // boundary with a non-Sendable COM object under Swift 6 strict checks.
+        _ = UWP.Launcher.launchUriAsync(uri)
 #else
         statusText = "COBOL-documentatie: \(code)"
 #endif

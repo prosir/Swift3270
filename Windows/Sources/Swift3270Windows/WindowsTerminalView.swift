@@ -9,7 +9,7 @@ struct WindowsTerminalView {
     let text: String
     let onAction: (String) -> Void
     let onCharacter: (Character) -> Void
-    let onPaste: (String) -> Void
+    let onPaste: @MainActor @Sendable (String) -> Void
 }
 
 extension WindowsTerminalView: WinUIElementRepresentable {
@@ -62,13 +62,21 @@ extension WindowsTerminalView: WinUIElementRepresentable {
     }
 
     private func pasteClipboardText() {
-        Task {
-            guard let content = UWP.Clipboard.getContent(),
-                  (try? content.contains(UWP.StandardDataFormats.text)) == true,
-                  let operation = try? content.getTextAsync(),
-                  let value = try? await operation.get(),
+        let paste = onPaste
+        guard let content = UWP.Clipboard.getContent(),
+              (try? content.contains(UWP.StandardDataFormats.text)) == true,
+              let operation = try? content.getTextAsync() else { return }
+
+        // Use the native WinRT completion callback so the non-Sendable COM
+        // operation never crosses a Swift concurrency boundary.
+        operation.completed = { operation, status in
+            guard status == .completed,
+                  let operation,
+                  let value = try? operation.getResults(),
                   !value.isEmpty else { return }
-            onPaste(value)
+            Task { @MainActor in
+                paste(value)
+            }
         }
     }
 
