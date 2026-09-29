@@ -13,6 +13,7 @@ struct TerminalPluginCapabilities: OptionSet, Hashable, Sendable {
     static let developerSplit = Self(rawValue: 1 << 5)
     static let personalization = Self(rawValue: 1 << 6)
     static let boxSelection = Self(rawValue: 1 << 7)
+    static let cobolErrorLookup = Self(rawValue: 1 << 8)
 }
 
 enum AppAccentTheme: String, CaseIterable, Identifiable {
@@ -185,6 +186,14 @@ struct TerminalPlugin: Identifiable, Hashable {
             icon: "rectangle.dashed",
             version: "1.0",
             capabilities: .boxSelection
+        ),
+        TerminalPlugin(
+            id: "cobol-error-lookup",
+            name: "COBOL Error Lookup",
+            summary: "Vind IGY-compilerfouten op het scherm en zoek ze op met Command-Shift-E.",
+            icon: "exclamationmark.magnifyingglass",
+            version: "1.0",
+            capabilities: .cobolErrorLookup
         )
     ]
 }
@@ -194,6 +203,7 @@ final class TerminalPluginStore: ObservableObject {
     private static let enabledPluginIDsKey = "Swift3270.enabledTerminalPlugins.v1"
     private static let personalizeMigrationKey = "Swift3270.plugin.personalizeIntroduced"
     private static let boxSelectionMigrationKey = "Swift3270.plugin.boxSelectionIntroduced"
+    private static let cobolErrorLookupMigrationKey = "Swift3270.plugin.cobolErrorLookupIntroduced"
 
     @Published private(set) var enabledPluginIDs: Set<String> {
         didSet {
@@ -218,6 +228,10 @@ final class TerminalPluginStore: ObservableObject {
         if !UserDefaults.standard.bool(forKey: Self.boxSelectionMigrationKey) {
             initialIDs.insert("cobol-box-selection")
             UserDefaults.standard.set(true, forKey: Self.boxSelectionMigrationKey)
+        }
+        if !UserDefaults.standard.bool(forKey: Self.cobolErrorLookupMigrationKey) {
+            initialIDs.insert("cobol-error-lookup")
+            UserDefaults.standard.set(true, forKey: Self.cobolErrorLookupMigrationKey)
         }
         enabledPluginIDs = initialIDs
     }

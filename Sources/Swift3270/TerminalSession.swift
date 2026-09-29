@@ -1,5 +1,19 @@
 import Foundation
 
+private enum AutomaticLoginField {
+    case application
+    case userID
+    case password
+
+    var label: String {
+        switch self {
+        case .application: "toepassing"
+        case .userID: "userid"
+        case .password: "password"
+        }
+    }
+}
+
 @MainActor
 final class TerminalSession: ObservableObject, Identifiable {
     private static let preferredModelKey = "Swift3270.preferredTerminalModel"
@@ -53,6 +67,8 @@ final class TerminalSession: ObservableObject, Identifiable {
     private var directTextFlushTask: Task<Void, Never>?
     private var historyCaptureTask: Task<Void, Never>?
     private var inputWarningTask: Task<Void, Never>?
+    private var loginAutofillTask: Task<Void, Never>?
+    private var lastAutofilledPromptKey: String?
     private var lastPresentedErrorSignature: String?
     var onProfileChanged: (() -> Void)?
 
@@ -300,12 +316,22 @@ final class TerminalSession: ObservableObject, Identifiable {
         onProfileChanged?()
     }
 
-    func updateProfile(name: String, connectionSpec: String, codePage: String) {
+    func updateProfile(
+        name: String,
+        connectionSpec: String,
+        codePage: String,
+        applicationCode: String,
+        userID: String,
+        autoFillPassphrase: Bool
+    ) {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedSpec = connectionSpec.trimmingCharacters(in: .whitespacesAndNewlines)
         profile.name = trimmedName.isEmpty ? displayName : trimmedName
         profile.connectionSpec = trimmedSpec
         profile.codePage = codePage
+        profile.applicationCode = applicationCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        profile.userID = userID.trimmingCharacters(in: .whitespacesAndNewlines)
+        profile.autoFillPassphrase = autoFillPassphrase
 
         let parsed = HostSpec.parse(trimmedSpec)
         profile.host = parsed.host
@@ -318,6 +344,17 @@ final class TerminalSession: ObservableObject, Identifiable {
         } else {
             rebuildBackend()
             statusText = "Session updated"
+        }
+    }
+
+    func setAutomaticLogin(applicationCode: String, userID: String, enabled: Bool) {
+        profile.applicationCode = applicationCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        profile.userID = userID.trimmingCharacters(in: .whitespacesAndNewlines)
+        profile.autoFillPassphrase = enabled
+        lastAutofilledPromptKey = nil
+        onProfileChanged?()
+        if enabled {
+            scheduleLoginAutofill()
         }
     }
 
@@ -412,6 +449,25 @@ final class TerminalSession: ObservableObject, Identifiable {
         let trimmed = text.trimmingCharacters(in: .newlines)
         guard !trimmed.isEmpty else { return }
         await send(label: "Text") { try await backend.sendText(trimmed) }
+    }
+
+    func fillStoredPassphrase() async {
+        guard isConnected else {
+            statusText = "Maak eerst verbinding"
+            return
+        }
+        await flushDirectText()
+
+        do {
+            guard let passphrase = try PassphraseKeychain.load(for: profile.id), !passphrase.isEmpty else {
+                statusText = "Geen passphrase opgeslagen; voeg hem toe bij Sessie bewerken"
+                return
+            }
+            try await backend.sendText(passphrase)
+            statusText = "Passphrase veilig ingevuld"
+        } catch {
+            statusText = "Passphrase niet ingevuld: \(error.localizedDescription)"
+        }
     }
 
     func findOnHost(_ query: String) async {
@@ -714,6 +770,68 @@ final class TerminalSession: ObservableObject, Identifiable {
         screenCells = cells
         screenLines = cells.map { row in String(row.map(\.character)) }
         scheduleHistoryCapture()
+        scheduleLoginAutofill()
+    }
+
+    private func scheduleLoginAutofill() {
+        loginAutofillTask?.cancel()
+        guard profile.autoFillPassphrase, isConnected else { return }
+        loginAutofillTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(700))
+            guard !Task.isCancelled else { return }
+            await self?.autofillLoginIfNeeded()
+        }
+    }
+
+    private func autofillLoginIfNeeded() async {
+        guard profile.autoFillPassphrase, isConnected else { return }
+        let prompts = screenLines.enumerated().compactMap { row, line -> (Int, String, AutomaticLoginField)? in
+            let upper = line.uppercased()
+            let field: AutomaticLoginField
+            if upper.contains("KIES UW TOEPASSING") {
+                field = .application
+            } else if upper.contains("ENTER USERID") {
+                field = .userID
+            } else if upper.contains("PASSPHRASE")
+                        || upper.contains("PASS PHRASE")
+                        || upper.contains("ENTER PASSWORD") {
+                field = .password
+            } else {
+                return nil
+            }
+            return (row, upper.trimmingCharacters(in: .whitespaces), field)
+        }
+        guard let prompt = prompts.min(by: {
+            abs($0.0 - cursor.row) < abs($1.0 - cursor.row)
+        }), abs(prompt.0 - cursor.row) <= 3 else {
+            lastAutofilledPromptKey = nil
+            return
+        }
+
+        let promptKey = "\(prompt.0)|\(cursor.row)|\(prompt.1)"
+        guard promptKey != lastAutofilledPromptKey else { return }
+
+        do {
+            let value: String
+            switch prompt.2 {
+            case .application:
+                value = profile.applicationCode
+            case .userID:
+                value = profile.userID
+            case .password:
+                value = try PassphraseKeychain.load(for: profile.id) ?? ""
+            }
+            guard !value.isEmpty else {
+                statusText = "Login-scherm herkend, maar \(prompt.2.label) ontbreekt in de sessie"
+                return
+            }
+            lastAutofilledPromptKey = promptKey
+            try await backend.sendText(value)
+            try await backend.enter()
+            statusText = "Automatische login: \(prompt.2.label) ingevuld en bevestigd"
+        } catch {
+            statusText = "Automatische login mislukt: \(error.localizedDescription)"
+        }
     }
 
     private func scheduleHistoryCapture() {

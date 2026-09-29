@@ -30,6 +30,11 @@ struct Swift3270App: App {
                 Button("Erase EOF") { Task { await sessionStore.selectedSession.sendEraseEOF() } }
                 Button("Insertmodus aan") { Task { await sessionStore.selectedSession.enableInsertMode() } }
                     .keyboardShortcut("i", modifiers: [.command, .shift])
+                Button("Bewaarde passphrase invullen") {
+                    Task { await sessionStore.selectedSession.fillStoredPassphrase() }
+                }
+                .keyboardShortcut("p", modifiers: [.command, .shift])
+                .disabled(!sessionStore.selectedSession.isConnected)
                 Button(pluginStore.isEnabled(capability: .boxSelection) ? "Vakselectie uit" : "Vakselectie aan") {
                     pluginStore.toggle(capability: .boxSelection)
                 }

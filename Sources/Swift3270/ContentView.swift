@@ -229,6 +229,7 @@ private struct X3270TerminalPane: View {
     @State private var historyOffset = 0
     @State private var showSearch = false
     @State private var searchText = ""
+    @State private var showCOBOLErrorLookup = false
     @FocusState private var searchFocused: Bool
 
     private var activeCells: [[TerminalCell]] {
@@ -288,6 +289,12 @@ private struct X3270TerminalPane: View {
                     onFind: {
                         showSearch = true
                         DispatchQueue.main.async { searchFocused = true }
+                    },
+                    onLookupCOBOLError: {
+                        lookupSelectedCOBOLError()
+                    },
+                    onFillPassphrase: {
+                        Task { await session.fillStoredPassphrase() }
                     },
                     onHistoryScroll: { direction in
                         let next = historyOffset + direction
@@ -367,6 +374,12 @@ private struct X3270TerminalPane: View {
                     .padding(10)
                 }
             }
+            .overlay(alignment: .bottomTrailing) {
+                if plugins.isEnabled(capability: .cobolErrorLookup) {
+                    cobolErrorLookupOverlay
+                        .padding(10)
+                }
+            }
             .padding(10)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(X3270Colors.terminalFrame)
@@ -398,6 +411,116 @@ private struct X3270TerminalPane: View {
         .onChange(of: plugins.isEnabled(capability: .boxSelection)) { _ in
             selection = nil
         }
+        .onChange(of: plugins.isEnabled(capability: .cobolErrorLookup)) { enabled in
+            if !enabled { showCOBOLErrorLookup = false }
+        }
+    }
+
+    @ViewBuilder
+    private var cobolErrorLookupOverlay: some View {
+        let errors = detectedCOBOLErrorCodes(in: fullScreenText())
+        VStack(alignment: .trailing, spacing: 8) {
+            if showCOBOLErrorLookup {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("COBOL compilermeldingen")
+                            .font(.system(size: 12, weight: .semibold))
+                        Spacer()
+                        Button {
+                            showCOBOLErrorLookup = false
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    let focusedErrors = focusedCOBOLErrorCodes()
+                    let displayedErrors = focusedErrors.isEmpty ? errors : focusedErrors
+                    if displayedErrors.isEmpty {
+                        Text("Geen IGY-code gevonden op het scherm.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(X3270Colors.secondaryText)
+                    } else {
+                        ForEach(Array(displayedErrors.prefix(10)), id: \.self) { code in
+                            Button {
+                                openCOBOLErrorLookup(code)
+                            } label: {
+                                HStack {
+                                    Text(code)
+                                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                    Spacer()
+                                    Image(systemName: "arrow.up.right.square")
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(X3270Colors.accentText)
+                        }
+                    }
+                    Text("Cmd+Shift+E · zoekt in IBM-documentatie")
+                        .font(.system(size: 10))
+                        .foregroundStyle(X3270Colors.mutedText)
+                }
+                .padding(12)
+                .frame(width: 285)
+                .background(X3270Colors.panelBackground.opacity(0.98))
+                .overlay(RoundedRectangle(cornerRadius: 9).stroke(X3270Colors.border))
+                .clipShape(RoundedRectangle(cornerRadius: 9))
+            }
+
+            if !errors.isEmpty {
+                Button {
+                    lookupSelectedCOBOLError()
+                } label: {
+                    Label("\(errors.count) IGY-melding\(errors.count == 1 ? "" : "en")", systemImage: "exclamationmark.magnifyingglass")
+                        .font(.system(size: 11, weight: .semibold))
+                        .padding(.horizontal, 10)
+                        .frame(height: 30)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(X3270Colors.accentText)
+                .background(X3270Colors.panelBackground.opacity(0.96))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(X3270Colors.border))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+        }
+    }
+
+    private func lookupSelectedCOBOLError() {
+        let focusedErrors = focusedCOBOLErrorCodes()
+        if focusedErrors.count == 1, let code = focusedErrors.first {
+            openCOBOLErrorLookup(code)
+        } else {
+            showCOBOLErrorLookup = true
+        }
+    }
+
+    private func focusedCOBOLErrorCodes() -> [String] {
+        if selection != nil {
+            return detectedCOBOLErrorCodes(in: selectedText())
+        }
+        guard session.cursor.row >= 0, session.cursor.row < activeCells.count else { return [] }
+        let line = String(activeCells[session.cursor.row].map(\.character))
+        return detectedCOBOLErrorCodes(in: line)
+    }
+
+    private func detectedCOBOLErrorCodes(in text: String) -> [String] {
+        let pattern = #"\bIGY[A-Z0-9]{2}[0-9]{4}-[IWESU]\b"#
+        guard let expression = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return []
+        }
+        let nsText = text as NSString
+        var seen = Set<String>()
+        return expression.matches(in: text, range: NSRange(location: 0, length: nsText.length)).compactMap { match in
+            let code = nsText.substring(with: match.range).uppercased()
+            return seen.insert(code).inserted ? code : nil
+        }
+    }
+
+    private func openCOBOLErrorLookup(_ code: String) {
+        var components = URLComponents(string: "https://www.google.com/search")
+        components?.queryItems = [URLQueryItem(name: "q", value: "site:ibm.com/docs \(code) IBM COBOL")]
+        guard let url = components?.url else { return }
+        NSWorkspace.shared.open(url)
     }
 
     private func handleTerminalEvent(_ event: TerminalKeyEvent) {
@@ -590,6 +713,10 @@ private struct X3270MenuBar: View {
 
             menu("Connect") {
                 Button("Other...") { showConnectDialog = true }
+                Button("Bewaarde passphrase invullen") {
+                    Task { await session.fillStoredPassphrase() }
+                }
+                .disabled(!session.isConnected)
                 Divider()
                 Button("New Session...") { showNewSessionDialog = true }
                 Button("Edit Session...") { showEditSessionDialog = true }
@@ -1543,6 +1670,10 @@ private struct X3270ConnectionFields: View {
     @Binding var useTLS: Bool
     @Binding var acceptHostnameMismatch: Bool
     @Binding var acceptAnyCertificate: Bool
+    @Binding var applicationCode: String
+    @Binding var userID: String
+    @Binding var passphrase: String
+    @Binding var autoFillPassphrase: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1571,6 +1702,26 @@ private struct X3270ConnectionFields: View {
                 fieldLabel("LU naam")
                 TextField("Optioneel", text: $luName)
                     .modernTextField(monospaced: true)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                fieldLabel("Automatische login")
+                TextField("Toepassing, bijvoorbeeld TSOT of COF1R1", text: $applicationCode)
+                    .modernTextField(monospaced: true)
+                TextField("Userid", text: $userID)
+                    .modernTextField(monospaced: true)
+                SecureField("Veilig opgeslagen in macOS Sleutelhanger", text: $passphrase)
+                    .modernTextField(monospaced: true)
+                Toggle("Toepassing, userid en password automatisch invullen", isOn: $autoFillPassphrase)
+                    .font(.system(size: 12))
+                    .foregroundStyle(X3270Colors.primaryText)
+                    .disabled(passphrase.isEmpty)
+                Text("Bij elk herkend login-scherm vult Swift3270 de waarde in en bevestigt automatisch met Enter.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(X3270Colors.secondaryText)
+            }
+            .onChange(of: passphrase) { value in
+                if value.isEmpty { autoFillPassphrase = false }
             }
 
             VStack(alignment: .leading, spacing: 9) {
@@ -1689,6 +1840,12 @@ private struct X3270NewSessionDialog: View {
     @State private var acceptHostnameMismatch = false
     @State private var acceptAnyCertificate = false
     @State private var codePage = "cp037"
+    @State private var applicationCode = ""
+    @State private var userID = ""
+    @State private var passphrase = ""
+    @State private var autoFillPassphrase = false
+    @State private var keychainError: String?
+    @State private var profileID = UUID().uuidString
 
     private let codePages = [
         ("cp037", "US/International"),
@@ -1723,8 +1880,18 @@ private struct X3270NewSessionDialog: View {
                 luName: $luName,
                 useTLS: $useTLS,
                 acceptHostnameMismatch: $acceptHostnameMismatch,
-                acceptAnyCertificate: $acceptAnyCertificate
+                acceptAnyCertificate: $acceptAnyCertificate,
+                applicationCode: $applicationCode,
+                userID: $userID,
+                passphrase: $passphrase,
+                autoFillPassphrase: $autoFillPassphrase
             )
+
+            if let keychainError {
+                Text(keychainError)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.red)
+            }
 
             VStack(alignment: .leading, spacing: 8) {
                 fieldLabel("Codepage")
@@ -1767,8 +1934,23 @@ private struct X3270NewSessionDialog: View {
             acceptHostnameMismatch: acceptHostnameMismatch,
             acceptAnyCertificate: acceptAnyCertificate
         ) else { return }
-        store.addSession(name: name, connectionSpec: spec, codePage: codePage)
-        dismiss()
+        do {
+            try PassphraseKeychain.save(passphrase, for: profileID)
+            store.addSession(
+                profile: SessionProfile(
+                    id: profileID,
+                    name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+                    connectionSpec: spec,
+                    codePage: codePage,
+                    applicationCode: applicationCode.trimmingCharacters(in: .whitespacesAndNewlines),
+                    userID: userID.trimmingCharacters(in: .whitespacesAndNewlines),
+                    autoFillPassphrase: autoFillPassphrase
+                )
+            )
+            dismiss()
+        } catch {
+            keychainError = "Passphrase kon niet veilig worden opgeslagen: \(error.localizedDescription)"
+        }
     }
 
     private var canSubmit: Bool {
@@ -1830,6 +2012,11 @@ private struct X3270EditSessionDialog: View {
     @State private var acceptHostnameMismatch = false
     @State private var acceptAnyCertificate = false
     @State private var codePage = "cp037"
+    @State private var applicationCode = ""
+    @State private var userID = ""
+    @State private var passphrase = ""
+    @State private var autoFillPassphrase = false
+    @State private var keychainError: String?
 
     private let codePages = [
         ("cp037", "US/International"),
@@ -1862,8 +2049,18 @@ private struct X3270EditSessionDialog: View {
                 luName: $luName,
                 useTLS: $useTLS,
                 acceptHostnameMismatch: $acceptHostnameMismatch,
-                acceptAnyCertificate: $acceptAnyCertificate
+                acceptAnyCertificate: $acceptAnyCertificate,
+                applicationCode: $applicationCode,
+                userID: $userID,
+                passphrase: $passphrase,
+                autoFillPassphrase: $autoFillPassphrase
             )
+
+            if let keychainError {
+                Text(keychainError)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.red)
+            }
 
             VStack(alignment: .leading, spacing: 8) {
                 fieldLabel("Codepage")
@@ -1904,6 +2101,10 @@ private struct X3270EditSessionDialog: View {
             acceptHostnameMismatch = fields.acceptHostnameMismatch
             acceptAnyCertificate = fields.acceptAnyCertificate
             codePage = session.profile.codePage
+            applicationCode = session.profile.applicationCode
+            userID = session.profile.userID
+            passphrase = (try? PassphraseKeychain.load(for: session.profile.id)) ?? ""
+            autoFillPassphrase = session.profile.autoFillPassphrase && !passphrase.isEmpty
         }
     }
 
@@ -1922,8 +2123,20 @@ private struct X3270EditSessionDialog: View {
             acceptHostnameMismatch: acceptHostnameMismatch,
             acceptAnyCertificate: acceptAnyCertificate
         ) else { return }
-        store.updateSelectedSession(name: name, connectionSpec: spec, codePage: codePage)
-        dismiss()
+        do {
+            try PassphraseKeychain.save(passphrase, for: session.profile.id)
+            store.updateSelectedSession(
+                name: name,
+                connectionSpec: spec,
+                codePage: codePage,
+                applicationCode: applicationCode,
+                userID: userID,
+                autoFillPassphrase: autoFillPassphrase
+            )
+            dismiss()
+        } catch {
+            keychainError = "Passphrase kon niet veilig worden opgeslagen: \(error.localizedDescription)"
+        }
     }
 
     private var canSubmit: Bool {
@@ -1948,6 +2161,11 @@ private struct X3270ConnectDialog: View {
     @State private var useTLS = false
     @State private var acceptHostnameMismatch = false
     @State private var acceptAnyCertificate = false
+    @State private var applicationCode = ""
+    @State private var userID = ""
+    @State private var passphrase = ""
+    @State private var autoFillPassphrase = false
+    @State private var keychainError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -1966,8 +2184,18 @@ private struct X3270ConnectDialog: View {
                 luName: $luName,
                 useTLS: $useTLS,
                 acceptHostnameMismatch: $acceptHostnameMismatch,
-                acceptAnyCertificate: $acceptAnyCertificate
+                acceptAnyCertificate: $acceptAnyCertificate,
+                applicationCode: $applicationCode,
+                userID: $userID,
+                passphrase: $passphrase,
+                autoFillPassphrase: $autoFillPassphrase
             )
+
+            if let keychainError {
+                Text(keychainError)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.red)
+            }
 
             HStack {
                 Spacer()
@@ -1995,13 +2223,27 @@ private struct X3270ConnectDialog: View {
             useTLS = fields.tls
             acceptHostnameMismatch = fields.acceptHostnameMismatch
             acceptAnyCertificate = fields.acceptAnyCertificate
+            applicationCode = session.profile.applicationCode
+            userID = session.profile.userID
+            passphrase = (try? PassphraseKeychain.load(for: session.profile.id)) ?? ""
+            autoFillPassphrase = session.profile.autoFillPassphrase && !passphrase.isEmpty
         }
     }
 
     private func connect() {
         guard let spec = connectionSpec else { return }
-        Task { await session.connect(spec: spec) }
-        dismiss()
+        do {
+            try PassphraseKeychain.save(passphrase, for: session.profile.id)
+            session.setAutomaticLogin(
+                applicationCode: applicationCode,
+                userID: userID,
+                enabled: autoFillPassphrase
+            )
+            Task { await session.connect(spec: spec) }
+            dismiss()
+        } catch {
+            keychainError = "Passphrase kon niet veilig worden opgeslagen: \(error.localizedDescription)"
+        }
     }
 
     private var connectionSpec: String? {

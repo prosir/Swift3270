@@ -11,6 +11,8 @@ struct TerminalKeyboardCaptureView: NSViewRepresentable {
     var onCut: () -> Void
     var onPaste: (String) -> Void
     var onFind: () -> Void
+    var onLookupCOBOLError: () -> Void
+    var onFillPassphrase: () -> Void
     var onHistoryScroll: (Int) -> Void
     var onEvent: (TerminalKeyEvent) -> Void
 
@@ -25,6 +27,8 @@ struct TerminalKeyboardCaptureView: NSViewRepresentable {
         view.onCut = onCut
         view.onPaste = onPaste
         view.onFind = onFind
+        view.onLookupCOBOLError = onLookupCOBOLError
+        view.onFillPassphrase = onFillPassphrase
         view.onHistoryScroll = onHistoryScroll
         view.onEvent = onEvent
         DispatchQueue.main.async {
@@ -43,6 +47,8 @@ struct TerminalKeyboardCaptureView: NSViewRepresentable {
         nsView.onCut = onCut
         nsView.onPaste = onPaste
         nsView.onFind = onFind
+        nsView.onLookupCOBOLError = onLookupCOBOLError
+        nsView.onFillPassphrase = onFillPassphrase
         nsView.onHistoryScroll = onHistoryScroll
         nsView.onEvent = onEvent
     }
@@ -88,6 +94,8 @@ final class KeyCaptureNSView: NSView {
     var onCut: (() -> Void)?
     var onPaste: ((String) -> Void)?
     var onFind: (() -> Void)?
+    var onLookupCOBOLError: (() -> Void)?
+    var onFillPassphrase: (() -> Void)?
     var onHistoryScroll: ((Int) -> Void)?
     var onEvent: ((TerminalKeyEvent) -> Void)?
     private var selectionAnchor: (row: Int, column: Int)?
@@ -239,6 +247,17 @@ final class KeyCaptureNSView: NSView {
             if event.charactersIgnoringModifiers?.lowercased() == "f",
                capabilities.contains(.hostSearch) {
                 onFind?()
+                return
+            }
+            if event.modifierFlags.contains(.shift),
+               event.charactersIgnoringModifiers?.lowercased() == "e",
+               capabilities.contains(.cobolErrorLookup) {
+                onLookupCOBOLError?()
+                return
+            }
+            if event.modifierFlags.contains(.shift),
+               event.charactersIgnoringModifiers?.lowercased() == "p" {
+                onFillPassphrase?()
                 return
             }
             super.keyDown(with: event)

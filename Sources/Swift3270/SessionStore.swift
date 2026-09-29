@@ -40,20 +40,34 @@ final class SessionStore: ObservableObject {
         saveProfiles()
     }
 
-    func addSession(name: String, connectionSpec: String, codePage: String) {
+    func addSession(
+        name: String,
+        connectionSpec: String,
+        codePage: String,
+        applicationCode: String = "",
+        userID: String = "",
+        autoFillPassphrase: Bool = false
+    ) {
         addSession(
             profile: SessionProfile(
                 name: name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Nieuwe sessie" : name,
                 connectionSpec: connectionSpec.trimmingCharacters(in: .whitespacesAndNewlines),
-                codePage: codePage
+                codePage: codePage,
+                applicationCode: applicationCode,
+                userID: userID,
+                autoFillPassphrase: autoFillPassphrase
             )
         )
     }
 
     func duplicateSelectedSession() {
+        let sourceProfileID = selectedSession.profile.id
         var profile = selectedSession.profile
         profile.id = UUID().uuidString
         profile.name += " kopie"
+        if let passphrase = try? PassphraseKeychain.load(for: sourceProfileID) {
+            try? PassphraseKeychain.save(passphrase, for: profile.id)
+        }
         addSession(profile: profile)
     }
 
@@ -63,8 +77,10 @@ final class SessionStore: ObservableObject {
             return
         }
 
+        let profileID = sessions[index].profile.id
         await sessions[index].disconnect()
         sessions.remove(at: index)
+        try? PassphraseKeychain.delete(for: profileID)
         selectedSessionID = sessions[min(index, sessions.count - 1)].id
         saveProfiles()
     }
@@ -74,11 +90,21 @@ final class SessionStore: ObservableObject {
         saveProfiles()
     }
 
-    func updateSelectedSession(name: String, connectionSpec: String, codePage: String) {
+    func updateSelectedSession(
+        name: String,
+        connectionSpec: String,
+        codePage: String,
+        applicationCode: String,
+        userID: String,
+        autoFillPassphrase: Bool
+    ) {
         selectedSession.updateProfile(
             name: name,
             connectionSpec: connectionSpec,
-            codePage: codePage
+            codePage: codePage,
+            applicationCode: applicationCode,
+            userID: userID,
+            autoFillPassphrase: autoFillPassphrase
         )
         saveProfiles()
     }
@@ -113,6 +139,9 @@ struct SessionProfile: Identifiable, Equatable, Codable {
     var port: Int
     var useTLS: Bool
     var codePage: String
+    var applicationCode: String
+    var userID: String
+    var autoFillPassphrase: Bool
 
     init(
         id: String = UUID().uuidString,
@@ -121,7 +150,10 @@ struct SessionProfile: Identifiable, Equatable, Codable {
         host: String = "",
         port: Int = 23,
         useTLS: Bool = false,
-        codePage: String = "cp037"
+        codePage: String = "cp037",
+        applicationCode: String = "",
+        userID: String = "",
+        autoFillPassphrase: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -130,6 +162,28 @@ struct SessionProfile: Identifiable, Equatable, Codable {
         self.port = port
         self.useTLS = useTLS
         self.codePage = codePage
+        self.applicationCode = applicationCode
+        self.userID = userID
+        self.autoFillPassphrase = autoFillPassphrase
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, connectionSpec, host, port, useTLS, codePage
+        case applicationCode, userID, autoFillPassphrase
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        name = try values.decode(String.self, forKey: .name)
+        connectionSpec = try values.decodeIfPresent(String.self, forKey: .connectionSpec) ?? ""
+        host = try values.decodeIfPresent(String.self, forKey: .host) ?? ""
+        port = try values.decodeIfPresent(Int.self, forKey: .port) ?? 23
+        useTLS = try values.decodeIfPresent(Bool.self, forKey: .useTLS) ?? false
+        codePage = try values.decodeIfPresent(String.self, forKey: .codePage) ?? "cp037"
+        applicationCode = try values.decodeIfPresent(String.self, forKey: .applicationCode) ?? ""
+        userID = try values.decodeIfPresent(String.self, forKey: .userID) ?? ""
+        autoFillPassphrase = try values.decodeIfPresent(Bool.self, forKey: .autoFillPassphrase) ?? false
     }
 
     static let defaultProfile = SessionProfile(

@@ -6,11 +6,6 @@ on:
     paths:
       - "Windows/**"
       - ".github/workflows/windows.yml"
-  pull_request:
-    branches: [main]
-    paths:
-      - "Windows/**"
-      - ".github/workflows/windows.yml"
   workflow_dispatch:
   release:
     types: [published]
@@ -18,9 +13,14 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -35,10 +35,17 @@ jobs:
       - name: Show toolchain
         run: swift --version
 
-      - name: Test core
-        run: swift test --package-path Windows
+      - name: Cache Swift dependencies
+        uses: actions/cache@v4
+        with:
+          path: Windows/.build
+          key: windows-swift-6.3-${{ hashFiles('Windows/Package.resolved') }}
+          restore-keys: |
+            windows-swift-6.3-
 
-      - name: Build Windows app
+      # De release-build compileert Swift3270WindowsCore automatisch mee. Een
+      # losse `swift test` bouwde dezelfde dependencyboom nogmaals in debug.
+      - name: Build Windows app and core
         run: swift build --package-path Windows -c release
 
       - name: Package app
