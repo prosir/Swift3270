@@ -156,24 +156,32 @@ cd Swift3270\Windows
 
 Je kunt de broncode ook als ZIP downloaden via GitHub. Pak het archief uit en open PowerShell in de map `Swift3270\Windows`.
 
-### 6. Download de Swift-pakketten en voer de tests uit
+### 6. Voer de Core-tests uit
 
 Voer vanuit de map `Swift3270\Windows` uit:
 
 ```powershell
-swift package resolve
+Copy-Item Package.resolved Package.resolved.core-backup
 $env:SWIFT3270_CORE_ONLY = "1"
-swift test --jobs 2
-Remove-Item Env:\SWIFT3270_CORE_ONLY
+$testExitCode = 1
+try {
+    swift test --jobs 2
+    $testExitCode = $LASTEXITCODE
+} finally {
+    Remove-Item Env:\SWIFT3270_CORE_ONLY
+    Move-Item Package.resolved.core-backup Package.resolved -Force
+}
+if ($testExitCode -ne 0) { exit $testExitCode }
 ```
 
-De eerste keer worden de Swift-afhankelijkheden gedownload. Dat kan enkele minuten duren. De Core-only instelling voorkomt dat de grote WinUI/CWinRT-library tijdens de tests al wordt gebouwd.
+De Core-only instelling voorkomt dat SwiftCrossUI, Android, Java en de grote WinUI/CWinRT-library tijdens deze tests worden gedownload of gebouwd.
 
 ### 7. Bouw de Windows-app
 
 Maak daarna de volledige release-build:
 
 ```powershell
+swift package resolve
 swift build -c release --product Swift3270Windows --jobs 2
 ```
 
@@ -297,10 +305,18 @@ Wacht eerst tot de host klaar is met verwerken. Klik daarna op **Reset**. Verbre
 cd "$env:USERPROFILE\source\Swift3270"
 git pull
 cd Windows
-swift package resolve
+Copy-Item Package.resolved Package.resolved.core-backup
 $env:SWIFT3270_CORE_ONLY = "1"
-swift test --jobs 2
-Remove-Item Env:\SWIFT3270_CORE_ONLY
+$testExitCode = 1
+try {
+    swift test --jobs 2
+    $testExitCode = $LASTEXITCODE
+} finally {
+    Remove-Item Env:\SWIFT3270_CORE_ONLY
+    Move-Item Package.resolved.core-backup Package.resolved -Force
+}
+if ($testExitCode -ne 0) { exit $testExitCode }
+swift package resolve
 swift build -c release --product Swift3270Windows --jobs 2
 ```
 

@@ -48,11 +48,26 @@ jobs:
           restore-keys: |
             windows-swift-6.3-
 
+      - name: Preserve dependency lockfile
+        shell: pwsh
+        run: Copy-Item Windows\Package.resolved "$env:RUNNER_TEMP\Swift3270-Package.resolved"
+
       - name: Run Windows core tests
         timeout-minutes: 10
         env:
           SWIFT3270_CORE_ONLY: "1"
         run: swift test --package-path Windows -c release --jobs 2
+
+      # A dependency-free manifest can make SwiftPM remove Package.resolved.
+      # Restore the pinned versions before resolving the full WinUI graph.
+      - name: Restore dependency lockfile
+        if: always()
+        shell: pwsh
+        run: Copy-Item "$env:RUNNER_TEMP\Swift3270-Package.resolved" Windows\Package.resolved -Force
+
+      - name: Resolve Windows app dependencies
+        timeout-minutes: 10
+        run: swift package resolve --package-path Windows
 
       # CWinRT contains hundreds of generated source files. Build it separately
       # from the core tests and limit concurrency to avoid memory pressure on
